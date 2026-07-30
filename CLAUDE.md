@@ -37,7 +37,8 @@ All work stays inside this repository root. **Never create, edit, or delete a fi
 - **Task 2 complete** — `0001_init.sql` + `0002_rls.sql` applied and verified (7 tables, 7 policies, 4 enums, the partial unique index proven to enforce, RLS proven to block anon and admit service-role). See `issue2.md`.
 - **Task 3 complete** — `packages/core/src/{types,sg-rules,facts}.ts` written; `sg-rules.ts`/`facts.ts` diffed byte-identical against §4/§5, `types.ts` derived from the schema with 3 `// SPEC-GAP:` notes. `pnpm typecheck`/`test`/build all green. See `issue3.md`.
 - **Task 4 complete** — `classify.ts` + `diffDays` (byte-identical against §6.1); `classify.test.ts` (boundaries at 2/3, 7/8, 45/46 days) and a `leads.state`-has-one-writer guard test, verified against a planted violation before being trusted. `SCAFFOLD_OK`/`scaffold.test.ts` retired. See `issue4.md`.
-- **Task 5 next** — `selectStrategy.ts` + tests + the 10-row `strategy_rules` seed (§6.3).
+- **Task 5 complete** — `selectStrategy.ts` (closed 6-key `match` schema, since `strategy_rules.match` is jsonb but §6.3 writes conditions as prose — see the amendment log for the new one), `0003_strategy_rules.sql` (10 rows, migration not seed — cadence can't run without it), 59 tests incl. a drift check proving the SQL and the TS constant can't diverge. Documents a real reachability gap: a `meta_ad` lead who submits the form gets `state=warm` from `classify()`, so `new_ad_lead` (`state=='new'`) never fires — pinned by a test, not silently fixed, and flagged for the README. See `issue5.md`.
+- **Task 6 next** — `guardrail.ts` G1–G5 (§6.4), G3's normalizer tests first.
 
 Update this section on each task commit.
 
@@ -51,11 +52,11 @@ The `supabase` CLI on this machine was a stale standalone binary (2.54.11) that 
 
 Resolutions to genuine gaps in the contract. Decided, not open. Do not re-litigate.
 
-### A1 — `approve_draft` ships as `0003_approve_draft.sql`, after task 7
+### A1 — `approve_draft` ships as `0004_approve_draft.sql`, after task 7
 
 §8 specifies `approve_draft` as a Postgres function doing four things atomically, step 2 being `MockProvider.send()`. plpgsql cannot invoke TypeScript, and `MockProvider` does not exist until task 7.
 
-**Resolution:** Task 2 ships `0001` + `0002` only. `0003_approve_draft.sql` lands after task 7 and before task 13 (queue UI). The plpgsql function performs the mock send inline — generating a `provider_msg_id` — while `MockProvider` remains the TS-side seam used by edge functions and the eval harness. Single-transaction atomicity, §8's whole reason for replacing the client `PATCH`, is preserved.
+**Resolution:** Task 2 ships `0001` + `0002` only. `0004_approve_draft.sql` (renumbered from `0003` — task 5 needed that slot for `strategy_rules`, since the rules table is reference data the app can't run without and belongs in a migration, not `seed.ts`) lands after task 7 and before task 13 (queue UI). The plpgsql function performs the mock send inline — generating a `provider_msg_id` — while `MockProvider` remains the TS-side seam used by edge functions and the eval harness. Single-transaction atomicity, §8's whole reason for replacing the client `PATCH`, is preserved.
 
 ### A2 — "six tenant tables" is a miscount; it is 5 + 2
 
@@ -68,6 +69,14 @@ Resolutions to genuine gaps in the contract. Decided, not open. Do not re-litiga
 `supabase/config.toml` ships with `sql_paths = ["./seed.sql"]` pointing at a file that does not exist, while §1 specifies `supabase/seed/seed.ts`.
 
 **Resolution:** set `db.seed.enabled = false` so `supabase db reset` does not warn or fail on the missing file. Task 8's `seed.ts` runs as a script.
+
+### A4 — `strategy_rules.match` uses a closed six-key schema, not an expression language
+
+The column is `jsonb`, but §6.3 writes its ten conditions as prose expressions (`state in ['cold','dormant'] && fact_gaps.length > 0`). Nothing in the contract defines what those look like as JSON or how `selectStrategy()` evaluates them.
+
+**Resolution:** six keys — `state_in`, `source_eq`, `snoozed`, `touch_count`, `fact_gaps_len`, `days_silent` — ANDed when present; numeric keys take `eq`/`gt`/`gte`/`lt`/`lte` against a literal or `{"agent":"max_touches"}` (with an optional `offset`). An unrecognised key or operator **throws** rather than being ignored, since a silently-vacuous condition on a priority-100 suppression rule would silence the whole queue. This is deliberately not a general parser — §4 already rejected one condition-DSL (`ELIGIBILITY_TOPICS.triggerWhen`) as unneeded scope, and that reasoning holds here for the same reason: a fixed, closed schema keeps "rules are editable in SQL without a deploy" true for *values*, while a new predicate *kind* still needs a code change. State that distinction plainly in the README.
+
+**Also recorded here:** a real reachability gap in §6.3, found by tracing `classify()` rather than reading the prose. A `meta_ad` lead who submits the ad form generates an inbound message, so `classify()` returns `warm`, not `new` — and `new_ad_lead` requires `state == 'new'`. `warm_human_handles` correctly stands down (`touch_count > 0` is false for a zero-touch lead), but nothing else matches, so the lead that most needs qualifying gets `no_rule_matched` instead of `instant_qualify`. Implemented literally per contract rule 1 rather than silently patched; pinned by a test in `selectStrategy.test.ts` that says explicitly not to "fix" it. Open question for the founder — see the README once it exists.
 
 ---
 
