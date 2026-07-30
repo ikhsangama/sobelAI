@@ -90,12 +90,41 @@ type SeedLead = {
   name: string
   phone: string
   source: string
-  touch_count: number
-  inboundDays: number | null
-  outboundDays: number | null
   createdDays: number
   opted_out?: boolean
   messages: SeedMsg[]
+}
+
+/**
+ * `last_inbound_at`, `last_outbound_at` and `touch_count` are derived from a
+ * lead's own `messages` here rather than typed as separate fields on
+ * `SeedLead`, so they can never quietly disagree with the thread they're
+ * supposed to summarize (review findings 1 and 2 on PR #17 — these were
+ * previously independent hand-typed fields and drifted from the actual
+ * thread for 5 of 6 leads: `last_inbound_at` by 1–5 hours on three leads, and
+ * `touch_count` — schema's own definition is "consecutive outbound with no
+ * inbound reply" — was off by one on two others).
+ */
+function deriveFromMessages(messages: SeedMsg[]) {
+  // Chronological (oldest first). Smaller `days` = more recent; within the
+  // same `days` bucket, smaller `hour` is earlier. None of the seeded
+  // threads have same-day messages that straddle a UTC day boundary via the
+  // hour-setting in `ago()`, so this ordering matches real time throughout.
+  const chrono = [...messages].sort((a, b) => b.days - a.days || a.hour - b.hour)
+
+  const lastInbound = [...chrono].reverse().find((m) => m.direction === 'inbound')
+  const lastOutbound = [...chrono].reverse().find((m) => m.direction === 'outbound')
+
+  let touch_count = 0
+  for (let i = chrono.length - 1; i >= 0 && chrono[i]!.direction === 'outbound'; i--) {
+    touch_count++
+  }
+
+  return {
+    last_inbound_at: lastInbound ? ago(lastInbound.days, lastInbound.hour) : null,
+    last_outbound_at: lastOutbound ? ago(lastOutbound.days, lastOutbound.hour) : null,
+    touch_count,
+  }
 }
 
 const LEADS: SeedLead[] = [
@@ -108,9 +137,6 @@ const LEADS: SeedLead[] = [
     name: 'Marcus Tan',
     phone: '+6591230001',
     source: 'propertyguru',
-    touch_count: 1,
-    inboundDays: 21,
-    outboundDays: 20,
     createdDays: 40,
     messages: [
       { direction: 'inbound', days: 40, hour: 21, body: 'hi saw ur listing on pg, still available ah' },
@@ -132,9 +158,6 @@ const LEADS: SeedLead[] = [
     name: 'Priya Nair',
     phone: '+6591230002',
     source: '99co',
-    touch_count: 1,
-    inboundDays: 21,
-    outboundDays: 20,
     createdDays: 50,
     messages: [
       { direction: 'inbound', days: 50, hour: 14, body: 'hi, saw the serangoon listing on 99co' },
@@ -158,9 +181,6 @@ const LEADS: SeedLead[] = [
     name: 'Jonathan Lim',
     phone: '+6591230003',
     source: 'meta_ad',
-    touch_count: 0,
-    inboundDays: null,
-    outboundDays: null,
     createdDays: 1,
     messages: [],
   },
@@ -173,9 +193,6 @@ const LEADS: SeedLead[] = [
     name: 'Siti Rahman',
     phone: '+6591230004',
     source: 'referral',
-    touch_count: 2,
-    inboundDays: 2,
-    outboundDays: 1,
     createdDays: 30,
     messages: [
       { direction: 'inbound', days: 30, hour: 11, body: 'hi, my colleague gave me ur number. looking to rent' },
@@ -198,9 +215,6 @@ const LEADS: SeedLead[] = [
     name: 'Kelvin Ong',
     phone: '+6591230005',
     source: 'propertyguru',
-    touch_count: 1,
-    inboundDays: 5,
-    outboundDays: 6,
     createdDays: 35,
     opted_out: true,
     messages: [
@@ -219,9 +233,6 @@ const LEADS: SeedLead[] = [
     name: 'Rachel Goh',
     phone: '+6591230006',
     source: 'manual',
-    touch_count: 1,
-    inboundDays: 60,
-    outboundDays: 59,
     createdDays: 90,
     messages: [
       { direction: 'inbound', days: 90, hour: 16, body: 'hi, met u at the queenstown showflat last wkend' },
@@ -264,6 +275,7 @@ async function main() {
 
     for (const t of targets) {
       const aid = agentId[t.agent]!
+      const derived = deriveFromMessages(spec.messages)
       const { data: lead, error: leadErr } = await db
         .from('leads')
         .insert({
@@ -274,9 +286,9 @@ async function main() {
           // Trap 4: placeholder only. generate-drafts owns this column.
           state: 'new',
           qualification_status: 'unqualified',
-          last_inbound_at: spec.inboundDays === null ? null : ago(spec.inboundDays, 20),
-          last_outbound_at: spec.outboundDays === null ? null : ago(spec.outboundDays, 10),
-          touch_count: spec.touch_count,
+          last_inbound_at: derived.last_inbound_at,
+          last_outbound_at: derived.last_outbound_at,
+          touch_count: derived.touch_count,
           opted_out: spec.opted_out ?? false,
           created_at: ago(spec.createdDays, 9),
         })
