@@ -136,4 +136,55 @@ describe('call', () => {
       }),
     )
   })
+
+  it('still logs a usage record when the model is unpriced, instead of dropping it', async () => {
+    // The request below actually "happens" (against a fake client) and burns
+    // 500/200 tokens before costUsd() ever runs. Losing the log line here
+    // would be worse than the parse-failure case above: real spend with zero
+    // trace of it.
+    const logged: LlmUsage[] = []
+    await expect(
+      call(
+        {
+          stage: 'write',
+          model: 'claude-opus-5',
+          prompt_version: 'write-v1',
+          system: 's',
+          user: 'u',
+          max_tokens: 1024,
+          temperature: 0.7,
+        },
+        { client: fakeClient('{"ok":true}', 500, 200), log: (u) => logged.push(u) },
+      ),
+    ).rejects.toThrow(/No cost entry/)
+
+    expect(logged).toHaveLength(1)
+    expect(logged[0]!.input_tokens).toBe(500)
+    expect(logged[0]!.output_tokens).toBe(200)
+    expect(logged[0]!.cost_usd).toBeNaN()
+  })
+
+  it('throws with a clear message when no client is injected and the API key is unset', async () => {
+    const original = process.env.ANTHROPIC_API_KEY
+    delete process.env.ANTHROPIC_API_KEY
+    try {
+      await expect(
+        call(
+          {
+            stage: 'extract',
+            model: 'claude-sonnet-4-6',
+            prompt_version: 'extract-v1',
+            system: 's',
+            user: 'u',
+            max_tokens: 100,
+            temperature: 0.3,
+          },
+          {},
+        ),
+      ).rejects.toThrow(/ANTHROPIC_API_KEY is not set/)
+    } finally {
+      if (original === undefined) delete process.env.ANTHROPIC_API_KEY
+      else process.env.ANTHROPIC_API_KEY = original
+    }
+  })
 })

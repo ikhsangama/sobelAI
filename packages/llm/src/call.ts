@@ -157,15 +157,28 @@ export async function call<T>(
     .map((block) => block.text ?? '')
     .join('')
 
-  const usage: LlmUsage = {
+  const usageBase = {
     stage: params.stage,
     model: params.model,
     prompt_version: params.prompt_version,
     input_tokens: response.usage.input_tokens,
     output_tokens: response.usage.output_tokens,
     latency_ms,
-    cost_usd: costUsd(params.model, response.usage.input_tokens, response.usage.output_tokens),
   }
+
+  // costUsd() is computed in its own try/catch, not inline in the object
+  // literal below: the request already happened and already cost money by
+  // this point, so an unpriced model must not cost the record its log line
+  // too. NaN is the sentinel for "spent, amount unknown" — never silently 0.
+  let cost_usd: number
+  try {
+    cost_usd = costUsd(params.model, response.usage.input_tokens, response.usage.output_tokens)
+  } catch (err) {
+    log({ ...usageBase, cost_usd: NaN })
+    throw err
+  }
+
+  const usage: LlmUsage = { ...usageBase, cost_usd }
 
   // Logged before parsing: a call that produced unparseable output still cost
   // real money and still belongs in the usage record.
