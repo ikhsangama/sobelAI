@@ -104,19 +104,39 @@ type SeedLead = {
  * thread for 5 of 6 leads: `last_inbound_at` by 1–5 hours on three leads, and
  * `touch_count` — schema's own definition is "consecutive outbound with no
  * inbound reply" — was off by one on two others).
+ *
+ * Throws rather than guessing if `messages` isn't already listed
+ * oldest-first, or if two messages share the same `(days, hour)`: a stable
+ * sort's tie-break on unordered or ambiguous input is exactly the class of
+ * silent-drift bug this function exists to eliminate, just relocated one
+ * level deeper (PR #17 review round 2 — confirmed by feeding the same tied
+ * pair in two different array orders and getting two different
+ * `touch_count` results).
  */
-function deriveFromMessages(messages: SeedMsg[]) {
-  // Chronological (oldest first). Smaller `days` = more recent; within the
-  // same `days` bucket, smaller `hour` is earlier. None of the seeded
-  // threads have same-day messages that straddle a UTC day boundary via the
-  // hour-setting in `ago()`, so this ordering matches real time throughout.
+function deriveFromMessages(messages: SeedMsg[], leadKey: string) {
+  // Chronological (oldest first): larger `days` = further in the past.
   const chrono = [...messages].sort((a, b) => b.days - a.days || a.hour - b.hour)
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i] !== chrono[i]) {
+      throw new Error(
+        `seed lead "${leadKey}": messages[${i}] is out of chronological order — ` +
+          `list messages oldest-first (largest "days" first).`,
+      )
+    }
+    if (i > 0 && messages[i]!.days === messages[i - 1]!.days && messages[i]!.hour === messages[i - 1]!.hour) {
+      throw new Error(
+        `seed lead "${leadKey}": messages[${i - 1}] and messages[${i}] share the same ` +
+          `(days, hour) — give them distinct hours, since a tie's relative order isn't ` +
+          `derivable from anything else and would otherwise depend on array position.`,
+      )
+    }
+  }
 
-  const lastInbound = [...chrono].reverse().find((m) => m.direction === 'inbound')
-  const lastOutbound = [...chrono].reverse().find((m) => m.direction === 'outbound')
+  const lastInbound = [...messages].reverse().find((m) => m.direction === 'inbound')
+  const lastOutbound = [...messages].reverse().find((m) => m.direction === 'outbound')
 
   let touch_count = 0
-  for (let i = chrono.length - 1; i >= 0 && chrono[i]!.direction === 'outbound'; i--) {
+  for (let i = messages.length - 1; i >= 0 && messages[i]!.direction === 'outbound'; i--) {
     touch_count++
   }
 
@@ -139,7 +159,7 @@ const LEADS: SeedLead[] = [
     source: 'propertyguru',
     createdDays: 40,
     messages: [
-      { direction: 'inbound', days: 40, hour: 21, body: 'hi saw ur listing on pg, still available ah' },
+      { direction: 'inbound', days: 40, hour: 20, body: 'hi saw ur listing on pg, still available ah' },
       { direction: 'outbound', days: 40, hour: 21, body: 'Hi Marcus! yes still available. what are u looking for?' },
       { direction: 'inbound', days: 39, hour: 9, body: 'looking at katong area, budget around 1.5m for a 3 bedder' },
       { direction: 'outbound', days: 39, hour: 10, body: 'noted! D15 3 bedders around that range, i have a few. own stay or invest?' },
@@ -275,7 +295,7 @@ async function main() {
 
     for (const t of targets) {
       const aid = agentId[t.agent]!
-      const derived = deriveFromMessages(spec.messages)
+      const derived = deriveFromMessages(spec.messages, spec.key)
       const { data: lead, error: leadErr } = await db
         .from('leads')
         .insert({
