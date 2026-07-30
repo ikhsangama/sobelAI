@@ -82,9 +82,24 @@ function normalize(body: string): string {
   return body.toLowerCase().replace(/[‘’]/g, "'").trim()
 }
 
-/** Alphanumerics only — so "STOP", "stop." and " Stop " all compare equal. */
+/**
+ * Strips only the ASCII whitespace/punctuation *framing* the message — so
+ * "STOP", "stop.", "  stop  " and "stop!" all reduce to "stop" — without
+ * touching interior characters of any script.
+ *
+ * // SPEC-GAP: an earlier version stripped every character outside
+ * `[a-z0-9]`, which deletes CJK text just as readily as punctuation. §7.1
+ * says explicitly "the conversation may be in Singlish or mixed
+ * English/Chinese", and under that version a message that is mostly Chinese
+ * but happens to mention the English word "stop" — "巴士站 stop 在哪里"
+ * ("where is the bus stop"), an ordinary question — collapsed to the bare
+ * string "stop" and permanently opted the lead out. Trimming only a leading
+ * or trailing run of ASCII whitespace/punctuation avoids that: any message
+ * with real content on either side, in any script, is left untouched and
+ * therefore never equals the bare keyword.
+ */
 function bareWord(text: string): string {
-  return text.replace(/[^a-z0-9]/g, '')
+  return text.replace(/^[\s.,!?;:'"()-]+|[\s.,!?;:'"()-]+$/g, '')
 }
 
 function matches(text: string, keyword: string): boolean {

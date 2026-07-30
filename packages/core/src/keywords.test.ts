@@ -104,6 +104,20 @@ describe('opt-out false positives — the whole reason `stop` is whole-message-o
   }
 })
 
+describe('opt-out false positives — mixed English/Chinese messages (§7.1 supports this)', () => {
+  // A prior bareWord() implementation stripped every non-[a-z0-9] character,
+  // including CJK text, so any mostly-Chinese message that merely mentioned
+  // the English word "stop" collapsed to the bare string "stop" and opted
+  // the lead out. Both of these are ordinary bus-stop questions, not opt-outs.
+  const mixedLanguage = ['巴士站 stop 在哪里', '这个 stop 离我很近']
+
+  for (const body of mixedLanguage) {
+    it(`does not opt out: "${body}"`, () => {
+      expect(detect(body).opted_out).toBe(false)
+    })
+  }
+})
+
 describe('snooze detection', () => {
   it('defaults to +30 days', () => {
     const r = detect('call me next month')
