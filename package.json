@@ -9,9 +9,11 @@
     "build": "pnpm --filter @revive/web build",
     "test": "vitest run",
     "typecheck": "pnpm -r exec tsc --noEmit",
-    "eval": "pnpm --filter @revive/eval start"
+    "eval": "pnpm --filter @revive/eval start",
+    "seed": "node --env-file-if-exists=.env.local supabase/seed/seed.ts"
   },
   "devDependencies": {
+    "@supabase/supabase-js": "^2.111.0",
     "typescript": "~6.0.2",
     "vitest": "^4.0.0"
   }
