@@ -81,9 +81,11 @@ Deno.serve(async (req) => {
     })
   }
 
+  // Select the full §8 response shape here too — the force-skip short-circuit
+  // below returns `existing` directly and must match the normal path's shape.
   const { data: existing, error: existErr } = await db
     .from('lead_facts')
-    .select('id, key, value')
+    .select('id, key, value, confidence, evidence, source_message_id')
     .eq('lead_id', lead_id)
     .is('superseded_at', null)
   if (existErr) return json({ error: `loading facts failed: ${existErr.message}` }, 500)
@@ -102,13 +104,15 @@ Deno.serve(async (req) => {
     const lastExtractedAt = lastRun?.[0]?.extracted_at
     const newestMessageAt = messages[messages.length - 1]!.sent_at
     if (lastExtractedAt && newestMessageAt <= lastExtractedAt) {
+      // §8's `facts` shape has no `id` — strip it rather than leak the
+      // internal supersede-lookup key the normal path never returns either.
       return json({
         lead_id,
         inserted: 0,
         superseded: 0,
         rejected: 0,
         rejections: [],
-        facts: existing ?? [],
+        facts: (existing ?? []).map(({ id: _id, ...rest }) => rest),
         usage: { latency_ms: 0, cost_usd: 0, prompt_version: version },
       })
     }
@@ -136,27 +140,33 @@ Deno.serve(async (req) => {
   // prompt, so source_message_index lines up.
   const { accepted, rejections } = validateFacts(parsed.facts, messages)
 
+  // A single extraction run must produce at most one live fact per key — the
+  // model can (and does) return the same key twice in one response, and
+  // without this, both would insert, leaving two live rows for one key.
+  // Keep the one from the most recent message, same "most recent value"
+  // tie-break the prompt already applies to genuine contradictions.
+  const dedup = new Map<string, (typeof accepted)[number]>()
+  for (const f of accepted) {
+    const current = dedup.get(f.key)
+    if (!current || f.source_message_index >= current.source_message_index) {
+      dedup.set(f.key, f)
+    }
+  }
+
   let inserted = 0
   let superseded = 0
 
-  for (const f of accepted) {
+  for (const f of dedup.values()) {
     const prior = (existing ?? []).find((e) => e.key === f.key)
 
     // Unchanged value — nothing to record. Inserting a duplicate would grow
     // the history with rows that say nothing happened.
     if (prior && sameValue(prior.value, f.value)) continue
 
-    // Trap 6 — supersede, never UPDATE.
-    if (prior) {
-      const { error } = await db
-        .from('lead_facts')
-        .update({ superseded_at: new Date().toISOString() })
-        .eq('id', prior.id)
-      if (error) return json({ error: `superseding ${f.key} failed: ${error.message}` }, 500)
-      superseded++
-    }
-
-    const { error } = await db.from('lead_facts').insert({
+    // Insert before superseding: if the insert fails, the prior fact stays
+    // live instead of vanishing. A visible duplicate on a retry is safer than
+    // silently losing a fact that factGaps() would then treat as missing.
+    const { error: insertError } = await db.from('lead_facts').insert({
       lead_id,
       agent_id: lead.agent_id,
       key: f.key,
@@ -165,8 +175,20 @@ Deno.serve(async (req) => {
       source_message_id: messages[f.source_message_index]!.id,
       evidence: f.evidence,
     })
-    if (error) return json({ error: `inserting ${f.key} failed: ${error.message}` }, 500)
+    if (insertError) return json({ error: `inserting ${f.key} failed: ${insertError.message}` }, 500)
     inserted++
+
+    // Trap 6 — supersede, never UPDATE.
+    if (prior) {
+      const { error: supersedeError } = await db
+        .from('lead_facts')
+        .update({ superseded_at: new Date().toISOString() })
+        .eq('id', prior.id)
+      if (supersedeError) {
+        return json({ error: `superseding ${f.key} failed: ${supersedeError.message}` }, 500)
+      }
+      superseded++
+    }
   }
 
   const { data: live } = await db
