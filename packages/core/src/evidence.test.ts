@@ -90,6 +90,38 @@ describe('validateFacts — layer 3 (numeric cross-check)', () => {
     expect(r.rejections[0]!.reason).toBe('value_evidence_mismatch')
   })
 
+  it('coerces a string-valued districts into §5s declared string[]', () => {
+    // §7.1 says "return the DXX code" without saying array-or-scalar, so the
+    // model returns either. A bare string is invisible to guardrail.ts's
+    // `Array.isArray(f.value)` check, so G3 then flags a truthful district as
+    // invented — observed live on a real extraction.
+    const r = validateFacts(
+      [fact({ key: 'districts', value: 'D15', evidence: 'looking at katong area' })],
+      MESSAGES,
+    )
+    expect(r.rejections).toEqual([])
+    expect(r.accepted[0]!.value).toEqual(['D15'])
+  })
+
+  it('leaves an already-correct districts array untouched', () => {
+    const r = validateFacts(
+      [fact({ key: 'districts', value: ['D15', 'D16'], evidence: 'looking at katong area' })],
+      MESSAGES,
+    )
+    expect(r.accepted[0]!.value).toEqual(['D15', 'D16'])
+  })
+
+  it('rejects a districts value that is neither a string nor a string[]', () => {
+    for (const bad of [15, null, {}, [], ['D15', 7]]) {
+      const r = validateFacts(
+        [fact({ key: 'districts', value: bad, evidence: 'looking at katong area' })],
+        MESSAGES,
+      )
+      expect(r.accepted, `value ${JSON.stringify(bad)} should be rejected`).toEqual([])
+      expect(r.rejections[0]!.reason).toBe('bad_shape')
+    }
+  })
+
   it('does not numeric-cross-check non-numeric keys', () => {
     // "looking at katong area" contains no digits at all; districts is not in
     // NUMERIC_CROSS_CHECK_KEYS, so layer 3 must not touch it.
