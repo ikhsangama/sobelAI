@@ -37,6 +37,17 @@ function sameValue(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b)
 }
 
+/** Row shape returned by supersede_and_insert_fact (0004_supersede_fact.sql). */
+interface SupersedeResult {
+  id: string
+  key: string
+  value: unknown
+  confidence: number
+  source_message_id: string
+  evidence: string
+  did_supersede: boolean
+}
+
 Deno.serve(async (req) => {
   let lead_id: string
   let force = false
@@ -163,32 +174,26 @@ Deno.serve(async (req) => {
     // the history with rows that say nothing happened.
     if (prior && sameValue(prior.value, f.value)) continue
 
-    // Insert before superseding: if the insert fails, the prior fact stays
-    // live instead of vanishing. A visible duplicate on a retry is safer than
-    // silently losing a fact that factGaps() would then treat as missing.
-    const { error: insertError } = await db.from('lead_facts').insert({
-      lead_id,
-      agent_id: lead.agent_id,
-      key: f.key,
-      value: f.value,
-      confidence: f.confidence,
-      source_message_id: messages[f.source_message_index]!.id,
-      evidence: f.evidence,
-    })
-    if (insertError) return json({ error: `inserting ${f.key} failed: ${insertError.message}` }, 500)
-    inserted++
+    // Trap 6 — supersede, never UPDATE the value. Both statements run inside
+    // one plpgsql transaction (0004_supersede_fact.sql): two separate awaited
+    // client calls left a window where a failure on either half produced a
+    // wrong result — an insert failure lost the prior fact with nothing to
+    // replace it, or a supersede failure left two live rows for one key.
+    const { data: result, error } = await db
+      .rpc('supersede_and_insert_fact', {
+        p_lead_id: lead_id,
+        p_agent_id: lead.agent_id,
+        p_key: f.key,
+        p_value: f.value,
+        p_confidence: f.confidence,
+        p_source_message_id: messages[f.source_message_index]!.id,
+        p_evidence: f.evidence,
+      })
+      .single<SupersedeResult>()
+    if (error) return json({ error: `recording ${f.key} failed: ${error.message}` }, 500)
 
-    // Trap 6 — supersede, never UPDATE.
-    if (prior) {
-      const { error: supersedeError } = await db
-        .from('lead_facts')
-        .update({ superseded_at: new Date().toISOString() })
-        .eq('id', prior.id)
-      if (supersedeError) {
-        return json({ error: `superseding ${f.key} failed: ${supersedeError.message}` }, 500)
-      }
-      superseded++
-    }
+    inserted++
+    if (result.did_supersede) superseded++
   }
 
   const { data: live } = await db
