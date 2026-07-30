@@ -71,25 +71,73 @@ interface EvalContext {
   max_touches: number
 }
 
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
 function resolveOperand(operand: NumOperand, ctx: EvalContext): number {
   if (typeof operand === 'number') return operand
   return ctx.max_touches + (operand.offset ?? 0)
 }
 
-function compareNum(
-  actual: number,
-  condition: NumCondition,
-  ctx: EvalContext,
-  rule: SeededRuleName,
-  field: string,
-): boolean {
-  for (const [op, operand] of Object.entries(condition)) {
+/**
+ * Validates a single operand: a number literal, or a reference to the
+ * agent's touch cap. `agent` only ever means `'max_touches'` today, so any
+ * other value (a typo, or a reference to a field this schema doesn't
+ * expose) is rejected here rather than silently falling through to
+ * `max_touches` anyway — see review finding 2 on PR #11.
+ */
+function parseNumOperand(raw: unknown, rule: SeededRuleName, field: string, op: string): NumOperand {
+  if (typeof raw === 'number') return raw
+  if (isPlainObject(raw) && raw.agent === 'max_touches') {
+    if ('offset' in raw && typeof raw.offset !== 'number') {
+      throw new Error(
+        `strategy_rules.match: ${field}.${op}.offset on rule "${rule}" must be a number, ` +
+          `got ${JSON.stringify(raw.offset)}.`,
+      )
+    }
+    return raw as NumOperand
+  }
+  throw new Error(
+    `strategy_rules.match: ${field}.${op} on rule "${rule}" must be a number or ` +
+      `{"agent":"max_touches"}, got ${JSON.stringify(raw)}.`,
+  )
+}
+
+/**
+ * Validates and parses a numeric condition. Must be a non-empty object of
+ * recognised operators — this is where PR #11 review finding 2 lived:
+ * `{ touch_count: 5 }` (a bare number instead of `{ eq: 5 }`), `{}` (empty),
+ * and `{ gte: "5" }` (a string operand) all previously passed straight
+ * through to `compareNum`, which silently treated each as "match anything"
+ * rather than failing loudly the way an unknown top-level key already did.
+ */
+function parseNumCondition(raw: unknown, rule: SeededRuleName, field: string): NumCondition {
+  if (!isPlainObject(raw) || Object.keys(raw).length === 0) {
+    throw new Error(
+      `strategy_rules.match: ${field} on rule "${rule}" must be a non-empty object of ` +
+        `operators (${NUM_OPS.join(', ')}), got ${JSON.stringify(raw)}.`,
+    )
+  }
+  const parsed: NumCondition = {}
+  for (const [op, operand] of Object.entries(raw)) {
     if (!(NUM_OPS as readonly string[]).includes(op)) {
       throw new Error(
         `strategy_rules.match: unknown operator "${op}" on ${field} of rule ` +
           `"${rule}". Allowed: ${NUM_OPS.join(', ')}.`,
       )
     }
+    parsed[op as keyof NumCondition] = parseNumOperand(operand, rule, field, op)
+  }
+  return parsed
+}
+
+function compareNum(
+  actual: number,
+  condition: NumCondition,
+  ctx: EvalContext,
+): boolean {
+  for (const [op, operand] of Object.entries(condition)) {
     const rhs = resolveOperand(operand as NumOperand, ctx)
     const ok =
       op === 'eq' ? actual === rhs
@@ -102,7 +150,12 @@ function compareNum(
   return true
 }
 
-/** Trap 5: an unrecognised key would make a rule vacuously match everything. */
+/**
+ * Trap 5: an unrecognised key would make a rule vacuously match everything.
+ * Validates every recognised key's *value* too, not just the key names —
+ * see the SPEC-GAP note above `RuleMatch` and PR #11 review finding 2 for
+ * why a value-shape check matters just as much as a key-name check here.
+ */
 function parseMatch(raw: Record<string, unknown>, rule: SeededRuleName): RuleMatch {
   for (const key of Object.keys(raw)) {
     if (!(MATCH_KEYS as readonly string[]).includes(key)) {
@@ -112,19 +165,51 @@ function parseMatch(raw: Record<string, unknown>, rule: SeededRuleName): RuleMat
       )
     }
   }
-  return raw as RuleMatch
+
+  const parsed: RuleMatch = {}
+
+  if ('state_in' in raw) {
+    if (!Array.isArray(raw.state_in)) {
+      throw new Error(
+        `strategy_rules.match: state_in on rule "${rule}" must be an array, ` +
+          `got ${JSON.stringify(raw.state_in)}.`,
+      )
+    }
+    parsed.state_in = raw.state_in as LeadState[]
+  }
+  if ('source_eq' in raw) {
+    if (typeof raw.source_eq !== 'string') {
+      throw new Error(
+        `strategy_rules.match: source_eq on rule "${rule}" must be a string, ` +
+          `got ${JSON.stringify(raw.source_eq)}.`,
+      )
+    }
+    parsed.source_eq = raw.source_eq as LeadSource
+  }
+  if ('snoozed' in raw) {
+    if (typeof raw.snoozed !== 'boolean') {
+      throw new Error(
+        `strategy_rules.match: snoozed on rule "${rule}" must be a boolean, ` +
+          `got ${JSON.stringify(raw.snoozed)}.`,
+      )
+    }
+    parsed.snoozed = raw.snoozed
+  }
+  if ('touch_count' in raw) parsed.touch_count = parseNumCondition(raw.touch_count, rule, 'touch_count')
+  if ('fact_gaps_len' in raw)
+    parsed.fact_gaps_len = parseNumCondition(raw.fact_gaps_len, rule, 'fact_gaps_len')
+  if ('days_silent' in raw) parsed.days_silent = parseNumCondition(raw.days_silent, rule, 'days_silent')
+
+  return parsed
 }
 
-function matches(m: RuleMatch, ctx: EvalContext, rule: SeededRuleName): boolean {
+function matches(m: RuleMatch, ctx: EvalContext): boolean {
   if (m.state_in && !m.state_in.includes(ctx.state)) return false
   if (m.source_eq !== undefined && ctx.source !== m.source_eq) return false
   if (m.snoozed !== undefined && ctx.snoozed !== m.snoozed) return false
-  if (m.touch_count && !compareNum(ctx.touch_count, m.touch_count, ctx, rule, 'touch_count'))
-    return false
-  if (m.fact_gaps_len && !compareNum(ctx.fact_gaps_len, m.fact_gaps_len, ctx, rule, 'fact_gaps_len'))
-    return false
-  if (m.days_silent && !compareNum(ctx.days_silent, m.days_silent, ctx, rule, 'days_silent'))
-    return false
+  if (m.touch_count && !compareNum(ctx.touch_count, m.touch_count, ctx)) return false
+  if (m.fact_gaps_len && !compareNum(ctx.fact_gaps_len, m.fact_gaps_len, ctx)) return false
+  if (m.days_silent && !compareNum(ctx.days_silent, m.days_silent, ctx)) return false
   return true
 }
 
@@ -216,7 +301,7 @@ export function selectStrategy(input: SelectStrategyInput): SelectStrategyResult
   let winner: StrategyRule | null = null
 
   for (const rule of byPriority) {
-    const matched = matches(parseMatch(rule.match, rule.name), ctx, rule.name)
+    const matched = matches(parseMatch(rule.match, rule.name), ctx)
     rules_evaluated.push({ name: rule.name, matched })
     if (matched && winner === null) winner = rule
   }

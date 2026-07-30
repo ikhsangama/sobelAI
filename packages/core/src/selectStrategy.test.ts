@@ -298,6 +298,57 @@ describe('selectStrategy — malformed rules fail loudly (trap 5)', () => {
     ]
     expect(() => run(coldSilentLead(), [], tied)).toThrow(/priority 100 is used by both/)
   })
+
+  /**
+   * PR #11 review finding 2: a malformed *value* under a recognised key used
+   * to silently match every lead instead of throwing, which is a worse
+   * version of exactly what the unknown-key test above already guards
+   * against. Verified against touch_cap (a priority-90 suppression rule) so
+   * a regression here would silently suppress the whole queue.
+   */
+  it('throws on a bare number instead of {op: value} — the sharpest case, since 0 is falsy', () => {
+    const bad = [{ ...DEFAULT_STRATEGY_RULES[2]!, match: { touch_count: 0 } }]
+    expect(() => run(coldSilentLead({ touch_count: 0 }), [], bad))
+      .toThrow(/touch_count on rule "touch_cap" must be a non-empty object/)
+  })
+
+  it('throws on an empty condition object rather than matching vacuously', () => {
+    const bad = [{ ...DEFAULT_STRATEGY_RULES[2]!, match: { touch_count: {} } }]
+    expect(() => run(coldSilentLead(), [], bad)).toThrow(/must be a non-empty object/)
+  })
+
+  it('throws on an unrecognised `agent` reference rather than silently using max_touches', () => {
+    const bad = [{
+      ...DEFAULT_STRATEGY_RULES[2]!,
+      match: { touch_count: { gte: { agent: 'quiet_hours_start' } } },
+    }]
+    expect(() => run(coldSilentLead(), [], bad as any))
+      .toThrow(/must be a number or \{"agent":"max_touches"\}/)
+  })
+
+  it('throws on a string operand rather than coercing it', () => {
+    const bad = [{ ...DEFAULT_STRATEGY_RULES[2]!, match: { touch_count: { gte: '99' } } }]
+    expect(() => run(coldSilentLead(), [], bad as any))
+      .toThrow(/must be a number or \{"agent":"max_touches"\}/)
+  })
+
+  it('throws when state_in is not an array', () => {
+    const bad = [{ ...DEFAULT_STRATEGY_RULES[0]!, match: { state_in: 'cold' } }]
+    expect(() => run(coldSilentLead(), [], bad as any))
+      .toThrow(/state_in on rule "hard_suppress" must be an array/)
+  })
+
+  it('throws when snoozed is not a boolean', () => {
+    const bad = [{ ...DEFAULT_STRATEGY_RULES[1]!, match: { snoozed: 'yes' } }]
+    expect(() => run(coldSilentLead(), [], bad as any))
+      .toThrow(/snoozed on rule "snoozed" must be a boolean/)
+  })
+
+  it('throws when source_eq is not a string', () => {
+    const bad = [{ ...DEFAULT_STRATEGY_RULES[4]!, match: { state_in: ['new'], source_eq: 123 } }]
+    expect(() => run(newLead(), [], bad as any))
+      .toThrow(/source_eq on rule "new_ad_lead" must be a string/)
+  })
 })
 
 describe('the migration and DEFAULT_STRATEGY_RULES cannot drift', () => {
@@ -308,12 +359,19 @@ describe('the migration and DEFAULT_STRATEGY_RULES cannot drift', () => {
       'utf8',
     )
 
-    // One `('<name>', <priority>, '<strategy>', <cooldown>, <enabled>,` per row.
+    // One `('<name>', <priority>, '<strategy>', <cooldown>, <enabled>, '<match jsonb>'::jsonb)`
+    // per row. `match` is captured and parsed too — see PR #11 review finding
+    // 1: an earlier version of this regex stopped before the jsonb literal,
+    // so a row's actual matching behaviour (the only thing that determines
+    // what it does) was never compared, only its name/priority/strategy/
+    // cooldown/enabled. Corrupting `listing_hook`'s match in the SQL only
+    // (state_in cold->warm, days_silent >=14->>=999) left this test green.
     const rows = [...sql.matchAll(
-      /\('(\w+)',\s*(\d+),\s*'([\w_]+)',\s*(\d+),\s*(true|false),/g,
+      /\('(\w+)',\s*(\d+),\s*'([\w_]+)',\s*(\d+),\s*(true|false),\s*'([^']*)'::jsonb/g,
     )].map((m) => ({
       name: m[1], priority: Number(m[2]), strategy: m[3],
       cooldown_days: Number(m[4]), enabled: m[5] === 'true',
+      match: JSON.parse(m[6]!),
     }))
 
     expect(rows).toHaveLength(DEFAULT_STRATEGY_RULES.length)
@@ -324,6 +382,7 @@ describe('the migration and DEFAULT_STRATEGY_RULES cannot drift', () => {
         strategy: expected.strategy,
         cooldown_days: expected.cooldown_days,
         enabled: expected.enabled,
+        match: expected.match,
       })
     }
   })
