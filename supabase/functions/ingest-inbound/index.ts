@@ -77,14 +77,20 @@ Deno.serve(async (req) => {
   // §6.2, deterministic and no LLM. sentAt is injected (trap 2).
   const detection = detectKeywords(body, sentAt)
 
-  // §8: last_inbound_at and touch_count always; opt-out/snooze only when hit.
+  // §8: last_inbound_at and touch_count always reset on any inbound.
+  // snooze_until follows the same rule, on the same reasoning: an inbound
+  // that isn't itself a new snooze request means the lead is back, so a
+  // stale snooze from an earlier message must not keep suppressing them.
+  // detection.snooze_until is already null on every non-snooze inbound
+  // (including opt-out, which detectKeywords never pairs with a snooze), so
+  // assigning it unconditionally both sets and clears correctly.
   // `state` is intentionally absent — trap 3.
   const leadUpdate: Record<string, unknown> = {
     last_inbound_at: sentAtIso,
     touch_count: 0,
+    snooze_until: detection.snooze_until,
   }
   if (detection.opted_out) leadUpdate.opted_out = true
-  if (detection.snooze_until) leadUpdate.snooze_until = detection.snooze_until
 
   const { error: updateErr } = await db.from('leads').update(leadUpdate).eq('id', lead_id)
   if (updateErr) return json({ error: `updating lead failed: ${updateErr.message}` }, 500)
