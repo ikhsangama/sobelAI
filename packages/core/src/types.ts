@@ -63,16 +63,17 @@ export type Strategy =
   | 'suppress'
 
 /**
- * Values that can appear as `trace.rule_fired`.
- *
- * // SPEC-GAP: this union is intentionally wider than the strategy_rules
- * table. The first ten are seeded rows (task 5). `cooldown_active` and
- * `no_rule_matched` are NOT rows — they are outcomes the selector reports:
- * `cooldown_active` when the winning rule is inside its own cooldown window
- * (a post-selection check, not a rule that competes on priority), and
- * `no_rule_matched` when nothing matched at all.
+ * The 10 seeded `strategy_rules` rows (§6.3) — this is what
+ * `StrategyRuleRow.name` is typed as, deliberately narrower than
+ * `RuleName` below. `cooldown_active` and `no_rule_matched` are NOT rows:
+ * §6.3 is explicit that a `cooldown_active` *row* was tried in an earlier
+ * draft and removed as circular (its own `cooldown_days: 0` made
+ * `days_since_outbound < 0`, always false), and §11 task 5 repeats "10
+ * rows — `cooldown_active` is a post-selection function, not a row."
+ * Reusing the wider `RuleName` union here would let a future seed insert
+ * exactly the row the architectural review deleted.
  */
-export type RuleName =
+export type SeededRuleName =
   | 'hard_suppress'
   | 'snoozed'
   | 'touch_cap'
@@ -83,8 +84,16 @@ export type RuleName =
   | 'listing_hook'
   | 'gentle_check_in'
   | 'long_dormant'
-  | 'cooldown_active'
-  | 'no_rule_matched'
+
+/**
+ * Values that can appear as `trace.rule_fired`: the 10 seeded rows above,
+ * plus two outcomes the selector reports rather than rows it evaluates —
+ * `cooldown_active` when the winning rule is inside its own cooldown
+ * window (a post-selection check, §6.3), and `no_rule_matched` when
+ * nothing matched at all (§6.3, "If no rule matches"). Both are named
+ * explicitly by the contract, so this is // NOTE (§6.3), not a SPEC-GAP.
+ */
+export type RuleName = SeededRuleName | 'cooldown_active' | 'no_rule_matched'
 
 /**
  * // SPEC-GAP: `leads.source` is a plain `text` column in the schema, not an
@@ -180,7 +189,7 @@ export interface Fact {
 
 export interface StrategyRuleRow {
   id: string
-  name: RuleName
+  name: SeededRuleName
   /** Higher wins. Unique across rows, so ties are impossible. */
   priority: number
   match: Record<string, unknown>
@@ -228,8 +237,11 @@ export interface EvalRunRow {
  * // SPEC-GAP: referenced by MessagingProvider.parseWebhook but never defined
  * in the contract. Derived from the `messages` table: what a provider can
  * pull out of a webhook payload before it has been resolved to a lead.
- * `from` is the sender's phone, which ingest-inbound matches against
- * `leads.phone`.
+ *
+ * No consumer in this build — §8's `ingest-inbound` takes `lead_id`
+ * directly and never resolves a phone. A real provider adapter would look
+ * up `from` against `leads.phone` before calling `ingest-inbound`; this
+ * type documents that seam, not a resolution step that exists today.
  */
 export interface InboundMessage {
   from: string
