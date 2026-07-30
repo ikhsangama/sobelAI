@@ -38,7 +38,8 @@ All work stays inside this repository root. **Never create, edit, or delete a fi
 - **Task 3 complete** — `packages/core/src/{types,sg-rules,facts}.ts` written; `sg-rules.ts`/`facts.ts` diffed byte-identical against §4/§5, `types.ts` derived from the schema with 3 `// SPEC-GAP:` notes. `pnpm typecheck`/`test`/build all green. See `issue3.md`.
 - **Task 4 complete** — `classify.ts` + `diffDays` (byte-identical against §6.1); `classify.test.ts` (boundaries at 2/3, 7/8, 45/46 days) and a `leads.state`-has-one-writer guard test, verified against a planted violation before being trusted. `SCAFFOLD_OK`/`scaffold.test.ts` retired. See `issue4.md`.
 - **Task 5 complete** — `selectStrategy.ts` (closed 6-key `match` schema, since `strategy_rules.match` is jsonb but §6.3 writes conditions as prose — see the amendment log for the new one), `0003_strategy_rules.sql` (10 rows, migration not seed — cadence can't run without it), 59 tests incl. a drift check proving the SQL and the TS constant can't diverge. Documents a real reachability gap: a `meta_ad` lead who submits the form gets `state=warm` from `classify()`, so `new_ad_lead` (`state=='new'`) never fires — pinned by a test, not silently fixed, and flagged for the README. See `issue5.md`.
-- **Task 6 next** — `guardrail.ts` G1–G5 (§6.4), G3's normalizer tests first.
+- **Task 6 complete** — `guardrail.ts` G1–G5, no LLM/quiet-hours/no-double-send (those moved or were deleted on review). Found and fixed two real bugs in §6.4's literally-specified G3 regex (amendment A5): a missing word-boundary that misreads ordinary phrases like "3 months" as invented numbers and defeats the year whitelist on `market_update` drafts, and a missing comma-strip that lets `$1,200,000`-style prices bypass G3 entirely. 101 tests. See `issue6.md`.
+- **Task 7 next** — `packages/llm/src/call.ts` (usage logging, cost table) + `MockProvider` in core.
 
 Update this section on each task commit.
 
@@ -77,6 +78,20 @@ The column is `jsonb`, but §6.3 writes its ten conditions as prose expressions 
 **Resolution:** six keys — `state_in`, `source_eq`, `snoozed`, `touch_count`, `fact_gaps_len`, `days_silent` — ANDed when present; numeric keys take `eq`/`gt`/`gte`/`lt`/`lte` against a literal or `{"agent":"max_touches"}` (with an optional `offset`). An unrecognised key or operator **throws** rather than being ignored, since a silently-vacuous condition on a priority-100 suppression rule would silence the whole queue. This is deliberately not a general parser — §4 already rejected one condition-DSL (`ELIGIBILITY_TOPICS.triggerWhen`) as unneeded scope, and that reasoning holds here for the same reason: a fixed, closed schema keeps "rules are editable in SQL without a deploy" true for *values*, while a new predicate *kind* still needs a code change. State that distinction plainly in the README.
 
 **Also recorded here:** a real reachability gap in §6.3, found by tracing `classify()` rather than reading the prose. A `meta_ad` lead who submits the ad form generates an inbound message, so `classify()` returns `warm`, not `new` — and `new_ad_lead` requires `state == 'new'`. `warm_human_handles` correctly stands down (`touch_count > 0` is false for a zero-touch lead), but nothing else matches, so the lead that most needs qualifying gets `no_rule_matched` instead of `instant_qualify`. Implemented literally per contract rule 1 rather than silently patched; pinned by a test in `selectStrategy.test.ts` that says explicitly not to "fix" it. Open question for the founder — see the README once it exists.
+
+### A5 — §6.4's literal G3 regex has two bugs, both fixed and marked `// SPEC-GAP:` in `guardrail.ts`
+
+§6.4 specifies G3's number normalizer literally, deliberately, so an implementer doesn't improvise the check the anti-hallucination story rests on. Running it rather than reading it surfaced two real defects.
+
+**Bug A — the suffix has no word boundary.** `/(\d+(?:\.\d+)?)\s*(k|m|mil|million|psf)?/gi` lets the `m` alternative match the leading letter of the *next word*: "3 months" → `3000000`, "900 metres" → `900000000`, "5 mins" → `5000000` — all ordinary phrasings, all flagged as invented numbers. Worse, "the 2026 market has been quiet" defeats step 3's own year whitelist: a year is only whitelisted while *bare*, and the stray `m` from "market" stops it being bare, breaking the exact `market_update` false-positive step 3 exists to prevent.
+
+**Resolution:** add a negative lookahead — `(?![a-z])` after the suffix group — so a suffix can't be followed by more letters.
+
+**Bug B — no comma handling, which fails open, not with noise.** `$1,200,000` (the ordinary way a price is written here) splits into `1`/`200`/`000`, all under step 4's ≥1000 floor, so G3 checks nothing and a fabricated price passes silently.
+
+**Resolution:** strip thousands separators (`text.replace(/(\d),(?=\d{3}(?!\d))/g, '$1')`) before matching, so "$1,200,000" reads as one `1200000` token.
+
+Both fixes and both regression tests (including an end-to-end `guardrail()` test proving the `$1,200,000`-style bypass now fails the draft) are in `guardrail.test.ts`. Bug B is the more serious of the two — it's a hole in the guardrail, not noise from it.
 
 ---
 
