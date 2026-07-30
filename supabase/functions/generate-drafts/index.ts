@@ -6,7 +6,7 @@ import {
   DEFAULT_STRATEGY_RULES,
   selectStrategy,
 } from '../../../packages/core/src/selectStrategy.ts'
-import { call } from '../../../packages/llm/src/call.ts'
+import { call, resolveModel } from '../../../packages/llm/src/call.ts'
 import * as writePrompt from '../../../packages/llm/src/prompts/write.ts'
 import * as tonePrompt from '../../../packages/llm/src/prompts/toneCheck.ts'
 
@@ -21,7 +21,8 @@ import * as tonePrompt from '../../../packages/llm/src/prompts/toneCheck.ts'
  * the only place `suppress` is turned into "no LLM call at all" (§8, trap 1).
  */
 
-const MODEL = 'claude-sonnet-4-6'
+/** §2's `claude-sonnet-4-6` unless LLM_PROVIDER/LLM_MODEL override it locally. */
+const MODEL = resolveModel()
 const WRITE_TEMPERATURE = 0.7 // §2
 const TONE_TEMPERATURE = 0 // §2 and §7.3
 const WRITE_MAX_TOKENS = 1024
