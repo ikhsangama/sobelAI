@@ -112,6 +112,63 @@ describe('G3 normalizer — SPEC-GAP bug B: comma-separated prices', () => {
   })
 })
 
+/**
+ * PR #13 review finding 1: the first fix for bug A — adding `(?![a-z])` alone
+ * — traded a false-positive bug for a false-invention bug. `\d+` is greedy,
+ * and a lookahead alone lets a failed match backtrack into a *shorter*
+ * digit run rather than being rejected: "1500000SGD" matched only "150000"
+ * (10x off, and a number the draft never contained), because after
+ * backtracking one digit the next character was itself a digit — not a
+ * letter — so the lookahead was satisfied. Widening the lookahead to `\w`
+ * and adding a leading lookbehind closes both the backtrack-within and the
+ * shift-start-position escape routes, so a digit run glued to letters is
+ * excluded entirely instead of mis-parsed.
+ */
+describe('G3 normalizer — SPEC-GAP: digits glued to letters must not backtrack into a wrong number', () => {
+  it('excludes the whole token rather than inventing a shorter number', () => {
+    expect(extractNumbers('price 1500000SGD firm')).toEqual([])
+    expect(extractNumbers('unit 1234A available')).toEqual([])
+    expect(extractNumbers('at 1.5mSGD')).toEqual([])
+  })
+
+  it('the same fix applies to $-amounts', () => {
+    expect(extractMoney('$1500000SGD firm')).toEqual([])
+    expect(extractMoney('$1,500,000SGD firm')).toEqual([])
+  })
+
+  it('still applies genuine suffixes and the comma fix (no regression)', () => {
+    expect(extractNumbers('at 1.5m in D15')).toEqual([1500000])
+    expect(extractNumbers('asking 900k for it')).toEqual([900000])
+    expect(extractNumbers('the 2026 market has been quiet')).toEqual([])
+    expect(extractNumbers('the price is $1,200,000 total')).toEqual([1200000])
+  })
+})
+
+/**
+ * PR #13 review finding 2: an earlier version of WORD_NUM_RE also accepted a
+ * bare article (`(?:(one|...|ten)|a)`) so "a thousand"/"a million" alone
+ * would match too. That's not in §6.4's word map and it collided with
+ * ordinary English — "thanks a million" and "one in a million" both
+ * normalised to 1000000 and failed G3, on exactly the warm phrasing the
+ * write prompt (§7.2) is tuned to produce.
+ */
+describe('G3 normalizer — SPEC-GAP: a bare article is not a word-number', () => {
+  it('does not treat common idioms as invented numbers', () => {
+    expect(extractNumbers('thanks a million for your time')).toEqual([])
+    expect(extractNumbers('a thousand things to sort')).toEqual([])
+    expect(extractNumbers('this unit is one in a million')).toEqual([])
+  })
+
+  it('a warm sign-off using the idiom passes the guardrail', () => {
+    expect(guardrail(body('Thanks a million for getting back to me'), FACTS).pass).toBe(true)
+  })
+
+  it('still catches the word-number map when a real unit precedes it', () => {
+    expect(extractNumbers('about one point two million lah')).toEqual([1200000])
+    expect(extractNumbers('roughly two million')).toEqual([2000000])
+  })
+})
+
 describe('G3 normalizer — step 4: what gets extracted', () => {
   it('captures psf without multiplying it', () => {
     expect(extractNumbers('1200 psf is fair')).toEqual([1200])

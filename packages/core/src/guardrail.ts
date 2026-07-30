@@ -36,14 +36,28 @@ const WORD_SCALES: Record<string, number> = { hundred: 100, thousand: 1000, mill
 const UNITS_ALT = Object.keys(WORD_UNITS).join('|')
 const SCALES_ALT = Object.keys(WORD_SCALES).join('|')
 
-/** Step 2: "one point two million", "two million", "a thousand". */
+/**
+ * Step 2: "one point two million", "two million".
+ *
+ * // SPEC-GAP: an earlier version of this file also accepted a bare article
+ * — `(?:(${UNITS_ALT})|a)` — so "thousand"/"million" alone (preceded only by
+ * "a") would also match. That's not in §6.4's word map ("one"…"ten",
+ * "hundred", "thousand", "million" — no article), and it collided with
+ * ordinary English: "thanks a million for getting back to me" and "one in a
+ * million" both normalised to 1000000 and failed G3, on exactly the warm,
+ * on-brand phrasing §7.2's write prompt is tuned to produce. Requiring one
+ * of the ten unit words removes the false positive; the residual gap (a
+ * bare "asking a million" going unchecked) is the same class of limitation
+ * §6.4 step 5 already accepts for a token-level check.
+ */
 const WORD_NUM_RE = new RegExp(
-  `\\b(?:(${UNITS_ALT})|a)(?:\\s+point\\s+(${UNITS_ALT}))?\\s+(${SCALES_ALT})\\b`,
+  `\\b(${UNITS_ALT})(?:\\s+point\\s+(${UNITS_ALT}))?\\s+(${SCALES_ALT})\\b`,
   'gi',
 )
 
 /**
- * Step 1, with a `(?![a-z])` the contract's version omits.
+ * Step 1, with a boundary the contract's version omits — and a lookbehind,
+ * which the contract's version also omits.
  *
  * // SPEC-GAP: §6.4 gives this as `/(\d+(?:\.\d+)?)\s*(k|m|mil|million|psf)?/gi`,
  * with no boundary after the suffix — so the `m` alternative matches the
@@ -54,11 +68,33 @@ const WORD_NUM_RE = new RegExp(
  * only gets whitelisted while it is *bare*, and the stray `m` stops it being
  * bare, which breaks the exact `market_update` false-positive step 3 exists
  * to prevent.
+ *
+ * A first fix of just adding `(?![a-z])` traded that bug for a worse one:
+ * `\d+` is greedy, and a lookahead alone lets a failed match backtrack into
+ * a *shorter* digit run instead of being rejected outright — "1500000SGD"
+ * matched only "150000" (a number 10x off, and one that never appeared in
+ * the draft), "1234A" backtracked to "123". A lookbehind on the leading edge
+ * closes that: with nothing to backtrack into on the left, a digit run
+ * glued to letters on either side is excluded entirely rather than
+ * mis-parsed. That's the correct failure direction per step 5 — a
+ * sufficiently unusual token goes unchecked, rather than G3 inventing a
+ * number the draft never contained.
  */
-const NUM_RE = /(\d+(?:\.\d+)?)\s*(k|m|mil|million|psf)?(?![a-z])/gi
+const NUM_RE = /(?<![\w.])(\d+(?:\.\d+)?)\s*(k|m|mil|million|psf)?(?![\w.])/gi
 
-/** Step 4: `$`-amounts, checked at any magnitude (see trap 5). */
-const MONEY_RE = /\$\s?\d[\d,]*(?:\.\d+)?\s*(k|m|mil|million)?(?![a-z])/gi
+/**
+ * Step 4: `$`-amounts, checked at any magnitude (see trap 5).
+ *
+ * Same trailing-boundary fix as NUM_RE (`\w` instead of `a-z` in the
+ * lookahead, so a digit run glued to more digits/letters can't backtrack
+ * into a shorter, wrong match — verified against "$1500000SGD" and
+ * "$1,500,000SGD" after comma-stripping). No leading lookbehind needed here:
+ * unlike NUM_RE, every match must start at a literal `$`, which is a unique
+ * anchor — there's no alternate start position mid-digit-run for the engine
+ * to retry at, so the failure mode a leading lookbehind guards against
+ * doesn't apply.
+ */
+const MONEY_RE = /\$\s?\d[\d,]*(?:\.\d+)?\s*(k|m|mil|million)?(?![\w.])/gi
 
 const DISTRICT_RE = /\bD\d{2}\b/gi
 
@@ -96,7 +132,7 @@ export function extractNumbers(draft: string): number[] {
 
   // Step 2 — word numbers, before the digit pass so both feed one filter.
   for (const m of draft.matchAll(WORD_NUM_RE)) {
-    const unit = m[1] ? WORD_UNITS[m[1].toLowerCase()]! : 1
+    const unit = WORD_UNITS[m[1]!.toLowerCase()]!
     const frac = m[2] ? WORD_UNITS[m[2].toLowerCase()]! / 10 : 0
     found.push((unit + frac) * WORD_SCALES[m[3]!.toLowerCase()]!)
   }
