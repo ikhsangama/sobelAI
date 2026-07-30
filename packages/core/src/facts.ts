@@ -1,4 +1,4 @@
-import type { Fact } from './types'
+import type { Fact } from './types.ts'
 
 export const FACT_KEYS = [
   'transaction_type',   // 'buy' | 'rent' | 'sell'

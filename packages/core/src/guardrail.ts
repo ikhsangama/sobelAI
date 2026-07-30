@@ -1,10 +1,10 @@
-import type { Fact } from './types'
+import type { Fact } from './types.ts'
 import {
   BANNED_PHRASES,
   ELIGIBILITY_KEYWORDS,
   MAX_DRAFT_CHARS,
   MIN_DRAFT_CHARS,
-} from './sg-rules'
+} from './sg-rules.ts'
 
 /**
  * The deterministic half of the guardrail (§6.4). Five checks, run in order,
@@ -147,8 +147,19 @@ function stripThousandsSeparators(text: string): string {
   return text.replace(/(\d),(?=\d{3}(?!\d))/g, '$1')
 }
 
-/** Every number in the draft worth checking: >= 1000 after normalisation. */
-export function extractNumbers(draft: string): number[] {
+/**
+ * Every number in the text, normalised (suffix multiplication, comma
+ * stripping, year whitelist) but NOT yet filtered by magnitude.
+ *
+ * // SPEC-GAP: split out of `extractNumbers` so §5's evidence cross-check can
+ * reuse the one normalizer without inheriting G3's >= 1000 floor. That floor
+ * is a draft-scanning concern (step 4 of §6.4) — but §5 layer 3 names
+ * `bedrooms` among the keys to cross-check, and a bedroom count can never
+ * clear 1000, so sharing the filtered version rejected every legitimate
+ * bedrooms fact as `value_evidence_mismatch`. G3's own behaviour is
+ * unchanged: `extractNumbers` still applies the filter.
+ */
+export function normalizeNumbers(draft: string): number[] {
   const found: number[] = []
 
   // Step 2 — word numbers, before the digit pass so both feed one filter.
@@ -168,8 +179,13 @@ export function extractNumbers(draft: string): number[] {
     found.push(n)
   }
 
+  return found
+}
+
+/** Every number in the draft worth checking: >= 1000 after normalisation. */
+export function extractNumbers(draft: string): number[] {
   // Step 4 — only numbers >= 1000 are worth cross-checking.
-  return found.filter((n) => n >= 1000)
+  return normalizeNumbers(draft).filter((n) => n >= 1000)
 }
 
 /**

@@ -7,8 +7,8 @@ import type {
   SeededRuleName,
   Strategy,
   StrategyRuleRow,
-} from './types'
-import { classify, diffDays } from './classify'
+} from './types.ts'
+import { classify, diffDays } from './classify.ts'
 
 /**
  * A rule as `selectStrategy` consumes it. `id` is the only column the

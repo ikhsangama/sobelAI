@@ -1,4 +1,4 @@
-import type { LeadRow, LeadState } from './types'
+import type { LeadRow, LeadState } from './types.ts'
 
 const MS_PER_DAY = 86_400_000
 
