@@ -1,0 +1,19 @@
+{
+  "name": "@revive/llm",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0",
+    "@revive/core": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^4.0.0"
+  }
+}
