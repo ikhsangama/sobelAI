@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { validateFacts } from '../../../packages/core/src/evidence.ts'
-import { call } from '../../../packages/llm/src/call.ts'
+import { call, resolveModel } from '../../../packages/llm/src/call.ts'
 import { buildUser, system, version } from '../../../packages/llm/src/prompts/extract.ts'
 
 /**
@@ -14,7 +14,8 @@ import { buildUser, system, version } from '../../../packages/llm/src/prompts/ex
  * didn't accept.
  */
 
-const MODEL = 'claude-sonnet-4-6'
+/** §2's `claude-sonnet-4-6` unless LLM_PROVIDER/LLM_MODEL override it locally. */
+const MODEL = resolveModel()
 const TEMPERATURE = 0.3 // §2, for the extract stage
 const MAX_TOKENS = 4096
 const MESSAGE_WINDOW = 20 // §7.1: "last 20"

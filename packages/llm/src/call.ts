@@ -34,7 +34,97 @@ export interface LlmCallResult<T> {
  * a wrong one.
  */
 const COST_PER_MTOK: Record<string, { input: number; output: number }> = {
+  // §2's model, and the documented default. Anthropic published pricing.
   'claude-sonnet-4-6': { input: 3.0, output: 15.0 },
+  // Dev-only alternative provider — see `resolveProvider()`. DeepSeek
+  // published pricing, cache-miss input rate. These exist so a local run on
+  // DeepSeek still reports a real cost_usd in the trace rather than throwing;
+  // they do not make DeepSeek the shipped default.
+  'deepseek-v4-pro': { input: 0.435, output: 0.87 },
+  'deepseek-v4-flash': { input: 0.14, output: 0.28 },
+}
+
+export type LlmProvider = 'anthropic' | 'deepseek'
+
+const DEFAULT_MODEL: Record<LlmProvider, string> = {
+  anthropic: 'claude-sonnet-4-6', // §2
+  deepseek: 'deepseek-v4-pro',
+}
+
+const DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
+
+/**
+ * // SPEC-GAP: §2 names `claude-sonnet-4-6` and `ANTHROPIC_API_KEY`, and that
+ * remains the default with no env set. `LLM_PROVIDER=deepseek` is a local
+ * development escape hatch for running the pipeline when Anthropic credits
+ * aren't available — it is deliberately opt-in so the shipped behaviour still
+ * matches the contract. If a run is ever demoed on DeepSeek, say so in the
+ * README alongside the React 19 departure.
+ */
+export function resolveProvider(): LlmProvider {
+  const raw = (readEnv('LLM_PROVIDER') ?? 'anthropic').toLowerCase()
+  if (raw !== 'anthropic' && raw !== 'deepseek') {
+    throw new Error(`LLM_PROVIDER must be "anthropic" or "deepseek", got "${raw}".`)
+  }
+  return raw
+}
+
+/** §2's model unless overridden. `LLM_MODEL` wins over the provider default. */
+export function resolveModel(): string {
+  return readEnv('LLM_MODEL') ?? DEFAULT_MODEL[resolveProvider()]
+}
+
+/**
+ * DeepSeek speaks the OpenAI chat-completions shape, so this adapter is the
+ * single point where the two wire formats differ: the system prompt becomes a
+ * message rather than a top-level field, and `prompt_tokens`/`completion_tokens`
+ * map onto `input_tokens`/`output_tokens`. Everything downstream in `call()` —
+ * usage logging, the cost table, fence stripping, the stage-named parse error
+ * — is provider-agnostic and untouched.
+ *
+ * `fetchImpl` is injectable so the translation can be unit-tested without a
+ * network call or a key, the same reason `CallDeps.client` exists.
+ */
+export function createDeepSeekClient(
+  apiKey: string,
+  fetchImpl: typeof fetch = fetch,
+): MessagesClient {
+  return {
+    messages: {
+      async create(params) {
+        const res = await fetchImpl(`${DEEPSEEK_BASE_URL}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: params.model,
+            max_tokens: params.max_tokens,
+            temperature: params.temperature,
+            messages: [{ role: 'system', content: params.system }, ...params.messages],
+            stream: false,
+          }),
+        })
+        if (!res.ok) {
+          // Same `<status> <body>` shape the Anthropic SDK error produces, so
+          // the callers' error strings read identically across providers.
+          throw new Error(`${res.status} ${await res.text()}`)
+        }
+        const body = (await res.json()) as {
+          choices?: { message?: { content?: string } }[]
+          usage?: { prompt_tokens?: number; completion_tokens?: number }
+        }
+        return {
+          content: [{ type: 'text', text: body.choices?.[0]?.message?.content ?? '' }],
+          usage: {
+            input_tokens: body.usage?.prompt_tokens ?? 0,
+            output_tokens: body.usage?.completion_tokens ?? 0,
+          },
+        }
+      },
+    },
+  }
 }
 
 /**
@@ -96,14 +186,26 @@ let defaultClient: MessagesClient | undefined
 /** Lazy so importing this module never requires a key — tests inject instead. */
 function getDefaultClient(): MessagesClient {
   if (!defaultClient) {
-    const apiKey = readEnv('ANTHROPIC_API_KEY')
-    if (!apiKey) {
-      throw new Error(
-        'ANTHROPIC_API_KEY is not set. It is server-side only (§2) — it belongs ' +
-          'in the edge function environment, never in anything VITE_ prefixed.',
-      )
+    if (resolveProvider() === 'deepseek') {
+      const apiKey = readEnv('DEEPSEEK_API_KEY')
+      if (!apiKey) {
+        throw new Error(
+          'DEEPSEEK_API_KEY is not set, but LLM_PROVIDER=deepseek. It is ' +
+            'server-side only — it belongs in the edge function environment, ' +
+            'never in anything VITE_ prefixed.',
+        )
+      }
+      defaultClient = createDeepSeekClient(apiKey)
+    } else {
+      const apiKey = readEnv('ANTHROPIC_API_KEY')
+      if (!apiKey) {
+        throw new Error(
+          'ANTHROPIC_API_KEY is not set. It is server-side only (§2) — it belongs ' +
+            'in the edge function environment, never in anything VITE_ prefixed.',
+        )
+      }
+      defaultClient = new Anthropic({ apiKey }) as unknown as MessagesClient
     }
-    defaultClient = new Anthropic({ apiKey }) as unknown as MessagesClient
   }
   return defaultClient
 }

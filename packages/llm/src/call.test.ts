@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest'
-import { call, costUsd, extractJson } from './call'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { call, costUsd, createDeepSeekClient, extractJson, resolveModel, resolveProvider } from './call'
 import type { LlmUsage, MessagesClient } from './call'
 
 function fakeClient(text: string, input = 1000, output = 500): MessagesClient {
@@ -21,6 +21,128 @@ describe('costUsd', () => {
 
   it('throws on an unpriced model rather than reporting $0 (trap 4)', () => {
     expect(() => costUsd('claude-opus-5', 100, 100)).toThrow(/No cost entry/)
+  })
+
+  it('prices the dev-only DeepSeek models from their published rates', () => {
+    // deepseek-v4-pro: $0.435 in / $0.87 out per 1M (cache-miss input rate).
+    expect(costUsd('deepseek-v4-pro', 1_000_000, 1_000_000)).toBeCloseTo(1.305, 10)
+    // deepseek-v4-flash: $0.14 in / $0.28 out per 1M.
+    expect(costUsd('deepseek-v4-flash', 1_000_000, 1_000_000)).toBeCloseTo(0.42, 10)
+  })
+})
+
+describe('provider selection — §2 stays the default', () => {
+  const saved = { ...process.env }
+  afterEach(() => {
+    process.env = { ...saved }
+  })
+
+  it('defaults to anthropic and §2s model with no env set', () => {
+    delete process.env.LLM_PROVIDER
+    delete process.env.LLM_MODEL
+    expect(resolveProvider()).toBe('anthropic')
+    expect(resolveModel()).toBe('claude-sonnet-4-6')
+  })
+
+  it('switches to deepseek only when explicitly opted in', () => {
+    process.env.LLM_PROVIDER = 'deepseek'
+    delete process.env.LLM_MODEL
+    expect(resolveProvider()).toBe('deepseek')
+    expect(resolveModel()).toBe('deepseek-v4-pro')
+  })
+
+  it('lets LLM_MODEL win over the provider default', () => {
+    process.env.LLM_PROVIDER = 'deepseek'
+    process.env.LLM_MODEL = 'deepseek-v4-flash'
+    expect(resolveModel()).toBe('deepseek-v4-flash')
+  })
+
+  it('throws on an unrecognised provider rather than silently using anthropic', () => {
+    process.env.LLM_PROVIDER = 'openai'
+    expect(() => resolveProvider()).toThrow(/must be "anthropic" or "deepseek"/)
+  })
+})
+
+describe('createDeepSeekClient — wire-format translation', () => {
+  function stubFetch(body: unknown, ok = true, status = 200) {
+    return vi.fn(
+      async (_input: unknown, _init?: RequestInit) =>
+        ({
+          ok,
+          status,
+          json: async () => body,
+          text: async () => JSON.stringify(body),
+        }) as unknown as Response,
+    )
+  }
+
+  const okBody = {
+    choices: [{ message: { content: '{"verdict":"pass"}' } }],
+    usage: { prompt_tokens: 120, completion_tokens: 34 },
+  }
+
+  it('moves the system prompt into the messages array (OpenAI shape)', async () => {
+    const f = stubFetch(okBody)
+    await createDeepSeekClient('sk-test', f).messages.create({
+      model: 'deepseek-v4-pro',
+      max_tokens: 512,
+      system: 'SYS',
+      temperature: 0.3,
+      messages: [{ role: 'user', content: 'USR' }],
+    })
+    const sent = JSON.parse(String(f.mock.calls[0]![1]!.body))
+    expect(sent.messages).toEqual([
+      { role: 'system', content: 'SYS' },
+      { role: 'user', content: 'USR' },
+    ])
+    expect(sent.model).toBe('deepseek-v4-pro')
+    expect(sent.temperature).toBe(0.3)
+    expect(sent.max_tokens).toBe(512)
+  })
+
+  it('maps prompt/completion tokens onto the Anthropic-shaped usage fields', async () => {
+    const r = await createDeepSeekClient('sk-test', stubFetch(okBody)).messages.create({
+      model: 'deepseek-v4-pro',
+      max_tokens: 512,
+      system: 's',
+      temperature: 0,
+      messages: [{ role: 'user', content: 'u' }],
+    })
+    expect(r.usage).toEqual({ input_tokens: 120, output_tokens: 34 })
+    expect(r.content).toEqual([{ type: 'text', text: '{"verdict":"pass"}' }])
+  })
+
+  it('is a drop-in for MessagesClient, so call() works unchanged over it', async () => {
+    const logged: LlmUsage[] = []
+    const result = await call<{ verdict: string }>(
+      {
+        stage: 'tone',
+        model: 'deepseek-v4-pro',
+        prompt_version: 'tone-v1',
+        system: 's',
+        user: 'u',
+        max_tokens: 512,
+        temperature: 0,
+      },
+      { client: createDeepSeekClient('sk-test', stubFetch(okBody)), log: (u) => logged.push(u) },
+    )
+    expect(result.parsed.verdict).toBe('pass')
+    expect(logged[0]!.input_tokens).toBe(120)
+    // Cost comes from the same table, so the trace stays comparable.
+    expect(logged[0]!.cost_usd).toBeCloseTo((120 / 1e6) * 0.435 + (34 / 1e6) * 0.87, 12)
+  })
+
+  it('throws `<status> <body>` on a non-2xx, matching the Anthropic error shape', async () => {
+    const f = stubFetch({ error: { message: 'nope' } }, false, 402)
+    await expect(
+      createDeepSeekClient('sk-test', f).messages.create({
+        model: 'deepseek-v4-pro',
+        max_tokens: 8,
+        system: 's',
+        temperature: 0,
+        messages: [{ role: 'user', content: 'u' }],
+      }),
+    ).rejects.toThrow(/^402 /)
   })
 })
 

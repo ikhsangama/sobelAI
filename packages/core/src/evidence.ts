@@ -58,6 +58,40 @@ export const NUMERIC_CROSS_CHECK_KEYS = ['budget_min', 'budget_max', 'bedrooms']
 /** §5: "within ±2% of the emitted value", to allow "1.2m" ↔ 1200000. */
 const TOLERANCE = 0.02
 
+/**
+ * §5's FACT_KEYS declares exactly one array-valued key: `districts // string[]`.
+ * Every other key is a scalar.
+ */
+const ARRAY_VALUED_KEYS: ReadonlySet<string> = new Set(['districts'])
+
+/**
+ * // SPEC-GAP: §7.1 tells the model "Districts: return the DXX code" without
+ * saying whether that is a string or an array, so it returns either —
+ * nondeterministically, across leads in the same run. Measured on a real
+ * extraction: Priya and Siti came back as `["D19"]`/`["D18"]`, while Marcus,
+ * Rachel and Kelvin came back as bare `"D15"`/`"D03"`/`"D16"`.
+ *
+ * That inconsistency is not cosmetic. `guardrail.ts`'s `factValues()` only
+ * collects districts when `Array.isArray(f.value)`, so a string-valued fact is
+ * invisible to G3 — and every district in an otherwise truthful draft is then
+ * flagged as invented. Observed live: Rachel's draft correctly said "D03",
+ * D03 was correctly extracted from "queenstown showflat", and G3 still failed
+ * it with "district D03 is not in the fact set". It fails closed, so nothing
+ * hallucinated slips through, but it rejects honest drafts. It would also
+ * break §10's F01, which asserts `districts` deep-equals `["D15"]`.
+ *
+ * Normalising here rather than in the prompt: §11 freezes the prompts at task
+ * 11, and §5 already makes this file the place where the server, not the
+ * model, decides what is allowed into `lead_facts`. Coercion is safe because
+ * it changes the container, never the content — the DXX code the model
+ * extracted is preserved exactly, and layers 2 and 3 still run against it.
+ */
+function normalizeArrayValued(value: unknown): string[] | null {
+  const list = Array.isArray(value) ? value : typeof value === 'string' ? [value] : null
+  if (!list || list.length === 0) return null
+  return list.every((v) => typeof v === 'string') ? (list as string[]) : null
+}
+
 function isRawFact(x: unknown): x is RawFact {
   if (typeof x !== 'object' || x === null) return false
   const f = x as Record<string, unknown>
@@ -102,6 +136,18 @@ export function validateFacts(raw: unknown, messages: { body: string }[]): Valid
       continue
     }
 
+    // Coerce §5's one array-valued key into its declared shape, so a
+    // string-valued `districts` can't slip past G3's Array.isArray() check.
+    let value = item.value
+    if (ARRAY_VALUED_KEYS.has(item.key)) {
+      const normalized = normalizeArrayValued(value)
+      if (!normalized) {
+        rejections.push({ key: item.key, reason: 'bad_shape', evidence: item.evidence })
+        continue
+      }
+      value = normalized
+    }
+
     const message = messages[item.source_message_index]
     if (!message) {
       rejections.push({ key: item.key, reason: 'bad_message_index', evidence: item.evidence })
@@ -116,7 +162,6 @@ export function validateFacts(raw: unknown, messages: { body: string }[]): Valid
 
     // Layer 3 — the number in the span must be the number that was emitted.
     if ((NUMERIC_CROSS_CHECK_KEYS as readonly string[]).includes(item.key)) {
-      const value = item.value
       if (typeof value !== 'number' || !Number.isFinite(value)) {
         rejections.push({ key: item.key, reason: 'value_evidence_mismatch', evidence: item.evidence })
         continue
@@ -131,7 +176,7 @@ export function validateFacts(raw: unknown, messages: { body: string }[]): Valid
 
     accepted.push({
       key: item.key as Fact['key'],
-      value: item.value,
+      value,
       confidence: item.confidence,
       source_message_index: item.source_message_index,
       evidence: item.evidence,
