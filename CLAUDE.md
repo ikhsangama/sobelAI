@@ -1,0 +1,72 @@
+# CLAUDE.md — Revive
+
+## Authority
+
+**`planning-overview.md` is the implementation contract.** Read the relevant § in full before starting any task. Everything in it is a decision already made.
+
+| File | Role |
+|---|---|
+| `planning-overview.md` | **The contract.** Authoritative. Post-architectural-review: 17 tasks, `/settings` cut, eval at task 12, 12 fixtures, guardrails G1–G5. |
+| `context.md` | Background on *why* — the briefing that commissioned the review. Not a spec. Never implement from it. |
+| `issueN.md` | Task N's working brief. One retained file per contract task. |
+
+If any other document, memory, or prior message conflicts with `planning-overview.md`, the contract wins. Older drafts of this spec exist in the wild and differ on ~12 load-bearing points (React 18, `MAX_DRAFT_CHARS = 480`, G1–G7, 11 strategy rules, a client-side `PATCH` approve, 3 routes, 20 fixtures, 18 tasks). Those are all **stale**.
+
+---
+
+## Rules for you (Claude Code)
+
+Reproduced verbatim from `planning-overview.md` — these apply on every turn.
+
+1. **Do not invent business logic.** Strategy rules, state thresholds, banned phrases, and required-fact sets are specified literally in the contract. If something is genuinely unspecified, add a `// SPEC-GAP:` comment and pick the simplest option — do not silently design.
+2. **Do not add features.** No auth UI, no billing, no real WhatsApp send, no broadcasts, no dark mode toggle, no landing page. Scope creep is the main failure mode here.
+3. **Deterministic stages must be pure functions with unit tests.** `classify()` and `selectStrategy()` take plain objects and return plain values. No DB calls, no LLM calls, no `Date.now()` inside them — pass `now` in.
+4. **Every LLM call goes through `packages/llm/src/call.ts`** which logs `{stage, model, prompt_version, input_tokens, output_tokens, latency_ms, cost_usd}`. No direct SDK calls anywhere else.
+5. **Never fabricate facts.** See the evidence rule in §5. This is the single most important correctness property in the repo.
+6. Work through §11 in order. Commit after each numbered task with the task number in the message.
+
+## Rule 7 — scope boundary
+
+All work stays inside this repository root. **Never create, edit, or delete a file outside it.** In particular, do not recreate a `CLAUDE.md` in any parent directory — one used to live there carrying the stale pre-review contract, and it was removed deliberately.
+
+---
+
+## Current state
+
+- **Task 1 complete** — pnpm workspace (`@revive/web|core|llm|eval`), React 19 + Vite 8 + Tailwind v4 + shadcn, `supabase init` done.
+- **Task 2 next** — `0001_init.sql` + `0002_rls.sql`. See `issue2.md`.
+
+Update this section on each task commit.
+
+---
+
+## Amendments
+
+Resolutions to genuine gaps in the contract. Decided, not open. Do not re-litigate.
+
+### A1 — `approve_draft` ships as `0003_approve_draft.sql`, after task 7
+
+§8 specifies `approve_draft` as a Postgres function doing four things atomically, step 2 being `MockProvider.send()`. plpgsql cannot invoke TypeScript, and `MockProvider` does not exist until task 7.
+
+**Resolution:** Task 2 ships `0001` + `0002` only. `0003_approve_draft.sql` lands after task 7 and before task 13 (queue UI). The plpgsql function performs the mock send inline — generating a `provider_msg_id` — while `MockProvider` remains the TS-side seam used by edge functions and the eval harness. Single-transaction atomicity, §8's whole reason for replacing the client `PATCH`, is preserved.
+
+### A2 — "six tenant tables" is a miscount; it is 5 + 2
+
+§3 says "enable RLS on all six tenant tables", then describes 5 tenant tables (`agents`, `leads`, `messages`, `lead_facts`, `drafts`) and 2 global ones (`strategy_rules`, `eval_runs`) — 7 total.
+
+**Resolution:** RLS enabled on **all 7**. `tenant_isolation` policy on the 5 tenant tables. A `for select using (true)` read-only policy on the 2 global tables; writes fall through to service-role bypass. Carry a `-- SPEC-GAP:` note in `0002_rls.sql`. Do not try to make the count come out to six.
+
+### A3 — the SQL seed hook is disabled; seeding is TypeScript at task 8
+
+`supabase/config.toml` ships with `sql_paths = ["./seed.sql"]` pointing at a file that does not exist, while §1 specifies `supabase/seed/seed.ts`.
+
+**Resolution:** set `db.seed.enabled = false` so `supabase db reset` does not warn or fail on the missing file. Task 8's `seed.ts` runs as a script.
+
+---
+
+## Conventions
+
+- Workspace packages: `@revive/web`, `@revive/core`, `@revive/llm`, `@revive/eval`.
+- `packages/core` has **zero runtime dependencies** and exports raw `.ts` from `./src/index.ts`. Deno edge functions import it from source starting at task 9. Never give it a build step or a `dependencies` key.
+- Tailwind v4 — no `tailwind.config.js`, no `postcss.config.js`. If you are writing `@tailwind base;` you have gone wrong.
+- Migrations use the contract's literal names (`0001_init.sql`, `0002_rls.sql`), not the CLI's timestamp format.
