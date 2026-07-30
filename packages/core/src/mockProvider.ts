@@ -1,4 +1,4 @@
-import type { InboundMessage, MessagingProvider } from './types'
+import type { InboundMessage, MessagingProvider } from './types.ts'
 
 /**
  * The only `MessagingProvider` implementation this build ships (§1).
