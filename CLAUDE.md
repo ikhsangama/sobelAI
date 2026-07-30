@@ -35,7 +35,8 @@ All work stays inside this repository root. **Never create, edit, or delete a fi
 
 - **Task 1 complete** — pnpm workspace (`@revive/web|core|llm|eval`), React 19 + Vite 8 + Tailwind v4 + shadcn, `supabase init` done.
 - **Task 2 complete** — `0001_init.sql` + `0002_rls.sql` applied and verified (7 tables, 7 policies, 4 enums, the partial unique index proven to enforce, RLS proven to block anon and admit service-role). See `issue2.md`.
-- **Task 3 next** — `packages/core`: `types.ts`, `sg-rules.ts`, `facts.ts`.
+- **Task 3 complete** — `packages/core/src/{types,sg-rules,facts}.ts` written; `sg-rules.ts`/`facts.ts` diffed byte-identical against §4/§5, `types.ts` derived from the schema with 3 `// SPEC-GAP:` notes. `pnpm typecheck`/`test`/build all green. See `issue3.md`.
+- **Task 4 next** — `classify.ts` + `classify.test.ts` (§6.1); delete `SCAFFOLD_OK` + `scaffold.test.ts`.
 
 Update this section on each task commit.
 
