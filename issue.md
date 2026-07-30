@@ -112,10 +112,11 @@ Then **replace** the generated `package.json` entirely:
     "dev": "pnpm --filter @revive/web dev",
     "build": "pnpm --filter @revive/web build",
     "test": "vitest run",
+    "typecheck": "pnpm -r exec tsc --noEmit",
     "eval": "pnpm --filter @revive/eval start"
   },
   "devDependencies": {
-    "typescript": "^5.7.0",
+    "typescript": "~6.0.2",
     "vitest": "^4.0.0"
   }
 }
@@ -124,7 +125,9 @@ Then **replace** the generated `package.json` entirely:
 Two version notes, so neither looks like an oversight:
 
 - **`vitest` must be `^4`**, not `^3` — the `vitest.config.ts` in step 6 uses the `projects` key, which doesn't exist in Vitest 3.0. A `^3.0.0` range can resolve to a version where root `pnpm test` fails on config resolution.
-- **`typescript` is deliberately pinned to `^5.7`**, not the current `latest`. TypeScript 7 is the native-port rewrite; 5.x is the safe choice for a one-day build and nothing here needs 7.
+- **`typescript` is pinned to `~6.0.2`, matching what `pnpm create vite` already installs in `apps/web`** — align the root to the tool's own default rather than fighting it, the same call already made for React 19 and Tailwind v4. An earlier draft of this file pinned root to `^5.7` while `apps/web` had `~6.0.2` from its own scaffold — two different TypeScript versions in one workspace, which is what actually broke `pnpm typecheck`, not either version being stale. (`typescript`'s real `latest` dist-tag is `7.0.2`, the native-port rewrite — deliberately not adopted here, but that's a separate decision from the 5.7/6.0.2 mismatch.)
+
+The `typecheck` script surfaces a real gap once you add it: `packages/eval/src/run.ts` uses `console.log`, but its `tsconfig.json` has no Node types (`lib: ["ES2022"]` alone doesn't include `console`). Add `"types": ["node"]` to `packages/eval/tsconfig.json` and `"@types/node": "^24.13.2"` to its `devDependencies` — see step 5.
 
 `// SPEC-GAP:` §11 doesn't specify root script wiring. `dev`/`build` delegate to the web app; `test` runs Vitest across the workspace (step 6); `eval` is the script §10 promises, stubbed until task 12.
 
@@ -432,11 +435,14 @@ export {}
     "@supabase/supabase-js": "^2.111.0"
   },
   "devDependencies": {
+    "@types/node": "^24.13.2",
     "tsx": "^4.19.0",
     "vitest": "^4.0.0"
   }
 }
 ```
+
+`@types/node` is here because `run.ts` runs on Node via `tsx` and uses Node globals (`console`, etc.) — without it, `pnpm typecheck` (step 10's checklist) fails with "Cannot find name 'console'" the moment there's any code in this file, since the shared tsconfig below only sets `lib: ["ES2022"]`.
 
 `@supabase/supabase-js` is here even though this package has no code yet: §10 has the eval runner truncating tables and inserting fixture rows directly against local Postgres between runs, so it needs a client of its own. Adding it now avoids a dependency detour in the middle of task 12.
 
@@ -475,6 +481,8 @@ Each package needs one. Write the same file to all three — `packages/core/tsco
   "include": ["src"]
 }
 ```
+
+**`packages/eval/tsconfig.json` needs one extra field** beyond this shared template — add `"types": ["node"]` inside `compilerOptions`, right after `"lib": ["ES2022"]`. `core` and `llm` don't need it yet (their `index.ts` files don't touch any Node globals); `eval` does, per the `@types/node` note above.
 
 Then install so pnpm wires the `workspace:*` links:
 
@@ -672,6 +680,7 @@ Stop the dev server with `Ctrl+C`.
 - [ ] `pnpm -r list --depth -1` shows all four `@revive/*` packages
 - [ ] `pnpm dev` renders a Tailwind-styled page with a working shadcn button
 - [ ] `pnpm test` exits 0
+- [ ] `pnpm typecheck` exits 0 across all four packages
 - [ ] `pnpm --filter @revive/web build` succeeds
 - [ ] `supabase status` shows services running; Studio loads at :54323
 - [ ] No `tailwind.config.js`, no `postcss.config.js`, no `packages/ui`

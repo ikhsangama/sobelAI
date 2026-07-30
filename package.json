@@ -8,10 +8,11 @@
     "dev": "pnpm --filter @revive/web dev",
     "build": "pnpm --filter @revive/web build",
     "test": "vitest run",
+    "typecheck": "pnpm -r exec tsc --noEmit",
     "eval": "pnpm --filter @revive/eval start"
   },
   "devDependencies": {
-    "typescript": "^5.7.0",
+    "typescript": "~6.0.2",
     "vitest": "^4.0.0"
   }
 }
