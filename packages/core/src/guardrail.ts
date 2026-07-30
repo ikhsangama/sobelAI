@@ -56,8 +56,8 @@ const WORD_NUM_RE = new RegExp(
 )
 
 /**
- * Step 1, with a boundary the contract's version omits — and a lookbehind,
- * which the contract's version also omits.
+ * Step 1, with a boundary the contract's version omits, and the digit
+ * portion locked so it can never partially back off (see below).
  *
  * // SPEC-GAP: §6.4 gives this as `/(\d+(?:\.\d+)?)\s*(k|m|mil|million|psf)?/gi`,
  * with no boundary after the suffix — so the `m` alternative matches the
@@ -69,32 +69,53 @@ const WORD_NUM_RE = new RegExp(
  * bare, which breaks the exact `market_update` false-positive step 3 exists
  * to prevent.
  *
- * A first fix of just adding `(?![a-z])` traded that bug for a worse one:
- * `\d+` is greedy, and a lookahead alone lets a failed match backtrack into
- * a *shorter* digit run instead of being rejected outright — "1500000SGD"
- * matched only "150000" (a number 10x off, and one that never appeared in
- * the draft), "1234A" backtracked to "123". A lookbehind on the leading edge
- * closes that: with nothing to backtrack into on the left, a digit run
- * glued to letters on either side is excluded entirely rather than
- * mis-parsed. That's the correct failure direction per step 5 — a
- * sufficiently unusual token goes unchecked, rather than G3 inventing a
- * number the draft never contained.
+ * Two narrower fixes were each tried and each reopened a variant of the same
+ * bug before landing on this one:
+ *
+ * 1. `(?![a-z])` alone: `\d+` is greedy, and a lookahead-only fix lets a
+ *    failed match backtrack into a *shorter* digit run instead of being
+ *    rejected outright — "1500000SGD" matched only "150000" (10x off, a
+ *    number that never appeared in the draft), because giving back one
+ *    digit left another digit as the "next character", which isn't in
+ *    `[a-z]` and so satisfied the lookahead anyway.
+ * 2. Widening to `(?![\w.])` (`\w` covers digits, closing #1) plus a leading
+ *    `(?<![\w.])`: this closed #1, but excluding `.` from the lookahead also
+ *    rejects a number immediately followed by a sentence-ending period with
+ *    no space — "I have a unit at 9.9mil." normalised to nothing at all, so
+ *    a fabricated $9.9m against a $1.5m fact passed `guardrail()` clean.
+ *    Dropping `.` from the lookahead to fix *that* reopens #1's failure mode
+ *    through the decimal point instead of a letter: "1500.5mSGD" backtracks
+ *    past the ".5" to a bare, wrong "1500".
+ *
+ * The actual problem is that a plain lookahead can't distinguish "the digit
+ * run gave up part of itself to satisfy the boundary" from "the boundary
+ * check ran once, cleanly, after the full number." Fixed by emulating an
+ * atomic group — `(?=(\d+(?:\.\d+)?))\1` matches the maximal digit+decimal
+ * span once inside a lookahead (capturing it to group 1), then a
+ * backreference (`\1`, not a new group — capture-group numbering for `m[1]`/
+ * `m[2]` is unaffected) consumes exactly that text. If the trailing
+ * lookahead then fails, there is nothing left to shrink: the whole match
+ * attempt fails outright rather than retrying with less of the number, and
+ * the leading `(?<![\w.])` stops the engine from restarting mid-run at the
+ * next character instead. Verified against all three prior cases at once:
+ * "1500000SGD"/"1234A"/"1500.5mSGD" now correctly match nothing, while
+ * "9.9mil.", "900k.", and "1500000." (all with no space before the period)
+ * now correctly extract 9900000 / 900000 / 1500000.
  */
-const NUM_RE = /(?<![\w.])(\d+(?:\.\d+)?)\s*(k|m|mil|million|psf)?(?![\w.])/gi
+const NUM_RE = /(?<![\w.])(?=(\d+(?:\.\d+)?))\1\s*(k|m|mil|million|psf)?(?![\w])/gi
 
 /**
  * Step 4: `$`-amounts, checked at any magnitude (see trap 5).
  *
- * Same trailing-boundary fix as NUM_RE (`\w` instead of `a-z` in the
- * lookahead, so a digit run glued to more digits/letters can't backtrack
- * into a shorter, wrong match — verified against "$1500000SGD" and
- * "$1,500,000SGD" after comma-stripping). No leading lookbehind needed here:
- * unlike NUM_RE, every match must start at a literal `$`, which is a unique
- * anchor — there's no alternate start position mid-digit-run for the engine
- * to retry at, so the failure mode a leading lookbehind guards against
- * doesn't apply.
+ * Same atomic-group fix as NUM_RE, and the same reasoning: a plain
+ * `(?![\w.])` lookahead excluded genuine sentence-final amounts like
+ * "$9.9mil." (no space before the period) exactly as it did for NUM_RE,
+ * confirmed on this function directly — `extractMoney('at $9.9mil.')`
+ * returned `[]`. No leading lookbehind needed here, unlike NUM_RE: every
+ * match must start at a literal `$`, which is a unique anchor, so there is
+ * no alternate start position mid-digit-run for the engine to retry at.
  */
-const MONEY_RE = /\$\s?\d[\d,]*(?:\.\d+)?\s*(k|m|mil|million)?(?![\w.])/gi
+const MONEY_RE = /\$\s?(?=(\d[\d,]*(?:\.\d+)?))\1\s*(k|m|mil|million)?(?![\w])/gi
 
 const DISTRICT_RE = /\bD\d{2}\b/gi
 
@@ -151,13 +172,24 @@ export function extractNumbers(draft: string): number[] {
   return found.filter((n) => n >= 1000)
 }
 
-/** `$`-amounts, at any magnitude — trap 5. */
+/**
+ * `$`-amounts, at any magnitude — trap 5.
+ *
+ * Reads the digit value straight from the atomic-captured group 1, rather
+ * than stripping non-digit characters out of the whole match — the earlier
+ * version of this function did `m[0].replace(/[^\d.]/g, '')` and read the
+ * suffix from `m[1]`, which was correct only while `MONEY_RE` had no digit
+ * capture group of its own. Adding the atomic-emulation lookahead gave
+ * `MONEY_RE` a real group 1 (the digits) and pushed the suffix to group 2;
+ * `m[1]` at that point still parsed (a same-looking numeric string) but was
+ * silently the wrong value — `extractMoney('at $9.9mil.')` returned `[9.9]`
+ * instead of `[9900000]`, because `m[1] ?? ''` was being fed to
+ * `applySuffix` as the *suffix* argument, where it matched none of the k/m/
+ * mil/million cases and applied no multiplier at all.
+ */
 export function extractMoney(draft: string): number[] {
   const text = stripThousandsSeparators(draft)
-  return [...text.matchAll(MONEY_RE)].map((m) => {
-    const digits = m[0].replace(/[^\d.]/g, '')
-    return applySuffix(parseFloat(digits), m[1] ?? '')
-  })
+  return [...text.matchAll(MONEY_RE)].map((m) => applySuffix(parseFloat(m[1]!), m[2] ?? ''))
 }
 
 /**

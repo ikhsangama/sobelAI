@@ -169,6 +169,68 @@ describe('G3 normalizer — SPEC-GAP: a bare article is not a word-number', () =
   })
 })
 
+/**
+ * PR #13 review, third round: the fix above for glued letters — widening the
+ * trailing lookahead to `(?![\w.])` plus a leading `(?<![\w.])` — excluded
+ * `.` from both, which meant a number immediately followed by a
+ * sentence-ending period with no space (extremely common WhatsApp register)
+ * was excluded too. "I have a unit at 9.9mil." normalised to nothing, so a
+ * fabricated $9.9m passed G3 clean against a $1.5m fact. Dropping `.` from
+ * just the lookahead to fix that reopened the *original* backtracking bug
+ * through the decimal point instead of a letter — "1500.5mSGD" backtracked
+ * past ".5" to a bare, wrong "1500". Fixed properly by emulating an atomic
+ * group so the digit+decimal span can never partially back off: it either
+ * matches in full or the whole attempt fails, with nothing in between for a
+ * boundary check to accidentally accept.
+ */
+describe('G3 normalizer — SPEC-GAP: a sentence-ending period must not hide a number', () => {
+  it('extracts a number immediately followed by a period with no space', () => {
+    expect(extractNumbers('I have a unit at 9.9mil.')).toEqual([9900000])
+    expect(extractNumbers('asking 900k. firm price')).toEqual([900000])
+    expect(extractNumbers('the price is 1500000. confirmed')).toEqual([1500000])
+  })
+
+  it('the same fix applies to $-amounts', () => {
+    expect(extractMoney('at $9.9mil.')).toEqual([9900000])
+    expect(extractMoney('a $500. deposit')).toEqual([500])
+  })
+
+  it('catches a fabricated price end to end when it only differs by the period', () => {
+    const r = guardrail(body('I have a great unit at $9.9mil. Interested?'), FACTS)
+    expect(r.pass).toBe(false)
+    expect(r.failedRule).toBe('G3')
+  })
+
+  it('does not reopen the original bug through the decimal point (no regression)', () => {
+    // A number glued to letters on both sides of its own decimal point must
+    // still be excluded entirely, not backtracked into a wrong bare integer.
+    expect(extractNumbers('weird 1500.5mSGD price')).toEqual([])
+    expect(extractMoney('weird $1500.5mSGD price')).toEqual([])
+  })
+
+  it('still excludes ordinary glued-letter cases (no regression)', () => {
+    expect(extractNumbers('price 1500000SGD firm')).toEqual([])
+    expect(extractMoney('$1500000SGD firm')).toEqual([])
+  })
+})
+
+/**
+ * A value-correctness regression, not just presence/absence: the atomic-group
+ * rewrite above gave MONEY_RE a real capturing group for its digits, which
+ * `extractMoney` didn't have to account for before (the pre-fix regex had no
+ * digit group at all, only a suffix group at position 1). `extractMoney`
+ * still read `m[1]` for the suffix afterwards, which meant it silently read
+ * the *digit* string as if it were the suffix — `applySuffix` found no
+ * k/m/mil/million match, applied no multiplier, and "$9.9mil." was extracted
+ * as `9.9` instead of `9900000`.
+ */
+describe('extractMoney — suffix must be read from the correct capture group', () => {
+  it('applies the k/m/mil/million multiplier, not just the bare digits', () => {
+    expect(extractMoney('asking $900k')).toEqual([900000])
+    expect(extractMoney('at $9.9mil.')).toEqual([9900000])
+  })
+})
+
 describe('G3 normalizer — step 4: what gets extracted', () => {
   it('captures psf without multiplying it', () => {
     expect(extractNumbers('1200 psf is fair')).toEqual([1200])
