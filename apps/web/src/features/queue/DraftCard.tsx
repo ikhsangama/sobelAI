@@ -55,9 +55,10 @@ export function DraftCard({ draft, now, busy, onApprove, onSkip }: Props) {
 
   const needsReview = draft.status === "needs_review"
   const guardrail = draft.trace?.guardrail as
-    | { failed_rule?: string | null; detail?: string }
+    | { failed_rule?: string | null; detail?: string; reasons?: string[] }
     | undefined
   const failedRule = guardrail?.failed_rule ?? null
+  const reasonsText = guardrail?.reasons?.length ? guardrail.reasons.join(", ") : null
 
   const daysSilent =
     draft.lead.last_inbound_at !== null ? diffDays(now, draft.lead.last_inbound_at) : null
@@ -90,6 +91,7 @@ export function DraftCard({ draft, now, busy, onApprove, onSkip }: Props) {
             ? (GUARDRAIL_REASONS[failedRule] ?? `Guardrail ${failedRule} failed.`)
             : "A guardrail failed."}
           {guardrail?.detail ? ` (${guardrail.detail})` : null}
+          {reasonsText ? ` (${reasonsText})` : null}
         </p>
       )}
 
