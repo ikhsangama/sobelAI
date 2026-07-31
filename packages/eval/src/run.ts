@@ -127,7 +127,12 @@ interface TraceShape {
     write?: { latency_ms?: number; cost_usd?: number }
     tone?: { latency_ms?: number; cost_usd?: number }
   }
-  guardrail?: { tone?: 'pass' | 'fail' | null }
+  guardrail?: {
+    deterministic?: 'pass' | 'fail' | null
+    tone?: 'pass' | 'fail' | null
+    failed_rule?: string | null
+    detail?: string
+  }
   prompt_versions?: { write?: string }
   /** Present when generate-drafts' per-lead outcome is "error" (task 11). */
   error?: string
@@ -190,7 +195,32 @@ async function runFixture(f: Fixture): Promise<RunResult> {
       ? [{ assertion: 'generate_drafts_error', detail: `generate-drafts errored: ${trace.error ?? '(no detail)'}` }]
       : []
 
-  const failures = hard ? [hard] : llmError.length ? llmError : runAssertions(f.expect, observed)
+  // The deterministic guardrail (§6.4) and tone check (§7.3) are enforced
+  // entirely inside generate-drafts, which persists a failing draft as
+  // `needs_review` and moves on (Trap 5) rather than erroring. Left
+  // unhandled, this outcome was invisible in the eval table — no assertion
+  // inspected `observed.outcome` directly, so a fixture whose draft failed
+  // G1/G2 or tone, and never even reached the independent G3 re-check,
+  // could report a fully clean row.
+  const needsReview: Failure[] =
+    observed.outcome === 'needs_review'
+      ? [
+          {
+            assertion: 'guardrail_failed',
+            detail: `generate-drafts marked needs_review — ${trace.guardrail?.failed_rule ?? 'unknown rule'}${
+              trace.guardrail?.detail ? `: ${trace.guardrail.detail}` : ''
+            }`,
+          },
+        ]
+      : []
+
+  const failures = hard
+    ? [hard]
+    : llmError.length
+      ? llmError
+      : needsReview.length
+        ? needsReview
+        : runAssertions(f.expect, observed)
 
   const usage = trace.usage ?? {}
   const latency_ms =

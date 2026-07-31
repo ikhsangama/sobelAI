@@ -166,7 +166,13 @@ export function runAssertions(expect: FixtureExpect, observed: Observed): Failur
     }
   }
 
-  // 6 — no_hallucinated_entities: re-run G3 independently of the pipeline.
+  // 6 — no_hallucinated_entities: re-run the guardrail independently of the
+  // pipeline. Report ANY failure, not just G3 — a G1/G2 failure used to be
+  // silently swallowed here, so a draft that was simultaneously too long
+  // AND named a fabricated district reported clean (no G3 result to see,
+  // since guardrail() short-circuits at the first failing rule). Route
+  // non-G3 failures under a distinct name so a length/banned-phrase failure
+  // doesn't misreport as a hallucination.
   if (expect.no_hallucinated_entities) {
     if (observed.draftBody === null) {
       failures.push({
@@ -175,8 +181,11 @@ export function runAssertions(expect: FixtureExpect, observed: Observed): Failur
       })
     } else {
       const g = guardrail(observed.draftBody, facts)
-      if (!g.pass && g.failedRule === 'G3') {
-        failures.push({ assertion: 'no_hallucinated_entities', detail: g.detail ?? 'G3 failed' })
+      if (!g.pass) {
+        failures.push({
+          assertion: g.failedRule === 'G3' ? 'no_hallucinated_entities' : 'guardrail_failed',
+          detail: `${g.failedRule}: ${g.detail ?? 'failed'}`,
+        })
       }
     }
   }

@@ -156,6 +156,33 @@ describe('no_hallucinated_entities — re-runs G3 independently', () => {
     const f = runAssertions({ no_hallucinated_entities: true }, observed({ draftBody: null }))
     expect(f).toHaveLength(1)
   })
+
+  it('does not pass vacuously when a G1 length failure masks a real G3 violation', () => {
+    // guardrail() short-circuits at the first failing rule, so a draft that is
+    // both too long (G1) and names a fabricated district (G3) never reaches
+    // the G3 check inside guardrail() itself — this is exactly the bug the
+    // old `g.failedRule === 'G3'`-only check let through as a clean pass.
+    const tooLong = 'x'.repeat(401) + ' just came up in D03'
+    const o = observed({
+      facts: [fact({ key: 'districts', value: ['D15'] })],
+      draftBody: tooLong,
+    })
+    const f = runAssertions({ no_hallucinated_entities: true }, o)
+    expect(f).toHaveLength(1)
+    expect(f[0]!.assertion).toBe('guardrail_failed')
+    expect(f[0]!.detail).toContain('G1')
+  })
+
+  it('routes a G2 banned-phrase failure under guardrail_failed, not no_hallucinated_entities', () => {
+    const o = observed({
+      facts: [fact({ key: 'districts', value: ['D15'] })],
+      draftBody: 'guaranteed returns on this D15 unit, keen to view?',
+    })
+    const f = runAssertions({ no_hallucinated_entities: true }, o)
+    expect(f).toHaveLength(1)
+    expect(f[0]!.assertion).toBe('guardrail_failed')
+    expect(f[0]!.detail).toContain('G2')
+  })
 })
 
 describe('draft_contains / draft_omits — case-insensitive', () => {
