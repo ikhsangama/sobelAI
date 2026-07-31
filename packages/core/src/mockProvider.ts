@@ -10,7 +10,7 @@ import type { InboundMessage, MessagingProvider } from './types.ts'
  *
  * `send()` performs NO I/O. §1 describes the mock as "writes to `messages`
  * with direction='outbound'", but CLAUDE.md amendment A1 already settled
- * where that write happens: `approve_draft` (migration 0004) does the insert
+ * where that write happens: `approve_draft` (migration 0005) does the insert
  * inside its transaction and generates the provider_msg_id inline, precisely
  * because plpgsql cannot call TypeScript. packages/core also has zero
  * dependencies and does no I/O (contract rule 3) — a send() that opened a
@@ -19,8 +19,22 @@ import type { InboundMessage, MessagingProvider } from './types.ts'
 export class MockProvider implements MessagingProvider {
   readonly name = 'mock' as const
 
-  /** Injected so tests are deterministic; defaults to a real UUID. */
-  constructor(private readonly newId: () => string = () => `mock-${crypto.randomUUID()}`) {}
+  private readonly newId: () => string
+
+  /**
+   * Injected so tests are deterministic; defaults to a real UUID.
+   *
+   * Written as an explicit field + assignment rather than a TypeScript
+   * parameter property because `apps/web` compiles with
+   * `erasableSyntaxOnly: true` (tsconfig.app.json), and a parameter property
+   * is not erasable — importing @revive/core's barrel from the web app fails
+   * `tsc -b` with TS1294 otherwise. packages/core is consumed as raw source by
+   * both Deno and Vite, so it has to stay within the intersection of what both
+   * accept.
+   */
+  constructor(newId: () => string = () => `mock-${crypto.randomUUID()}`) {
+    this.newId = newId
+  }
 
   send(_to: string, _body: string): Promise<{ providerMsgId: string }> {
     return Promise.resolve({ providerMsgId: this.newId() })
