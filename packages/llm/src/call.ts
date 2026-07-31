@@ -42,6 +42,7 @@ const COST_PER_MTOK: Record<string, { input: number; output: number }> = {
   // they do not make DeepSeek the shipped default.
   'deepseek-v4-pro': { input: 0.435, output: 0.87 },
   'deepseek-v4-flash': { input: 0.14, output: 0.28 },
+  'deepseek-chat': { input: 0.14, output: 0.28 },
 }
 
 export type LlmProvider = 'anthropic' | 'deepseek'
