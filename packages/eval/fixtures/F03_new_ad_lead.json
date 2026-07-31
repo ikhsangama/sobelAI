@@ -1,0 +1,34 @@
+{
+  "id": "F03_new_ad_lead",
+  "now": "2026-07-30T10:00:00+08:00",
+  "agent": {
+    "name": "Wei Ling",
+    "max_touches": 4,
+    "voice_profile": {
+      "formality": 2,
+      "warmth": 4,
+      "brevity": 4,
+      "emoji_ok": false,
+      "sign_off": "- Wei Ling",
+      "sample_messages": []
+    }
+  },
+  "lead": {
+    "name": "Jonathan",
+    "source": "meta_ad",
+    "touch_count": 0,
+    "created_at": "2026-07-29T09:00:00+08:00",
+    "phone": "+6591267033"
+  },
+  "messages": [],
+  "expect": {
+    "state": "new",
+    "rule_fired": "new_ad_lead",
+    "strategy": "instant_qualify",
+    "no_hallucinated_entities": true,
+    "draft_omits": [
+      "$"
+    ],
+    "tone_acceptable": true
+  }
+}

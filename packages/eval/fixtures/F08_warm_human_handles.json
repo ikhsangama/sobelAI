@@ -1,0 +1,40 @@
+{
+  "id": "F08_warm_human_handles",
+  "now": "2026-07-30T10:00:00+08:00",
+  "agent": {
+    "name": "Wei Ling",
+    "max_touches": 4,
+    "voice_profile": {
+      "formality": 2,
+      "warmth": 4,
+      "brevity": 4,
+      "emoji_ok": false,
+      "sign_off": "- Wei Ling",
+      "sample_messages": []
+    }
+  },
+  "lead": {
+    "name": "Siti",
+    "source": "referral",
+    "touch_count": 2,
+    "created_at": "2026-07-01T09:00:00+08:00",
+    "phone": "+6591286075"
+  },
+  "messages": [
+    {
+      "direction": "inbound",
+      "sent_at": "2026-07-28T20:00:00+08:00",
+      "body": "yes im keen! sat afternoon can?"
+    },
+    {
+      "direction": "outbound",
+      "sent_at": "2026-07-29T10:00:00+08:00",
+      "body": "sat 2pm works! ill confirm and revert"
+    }
+  ],
+  "expect": {
+    "state": "warm",
+    "rule_fired": "warm_human_handles",
+    "no_draft": true
+  }
+}

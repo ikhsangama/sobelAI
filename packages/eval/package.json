@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "tsx src/run.ts"
+    "start": "tsx --env-file-if-exists=../../.env.local src/run.ts"
   },
   "dependencies": {
     "@revive/core": "workspace:*",

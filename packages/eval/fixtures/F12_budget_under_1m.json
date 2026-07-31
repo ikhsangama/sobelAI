@@ -1,0 +1,46 @@
+{
+  "id": "F12_budget_under_1m",
+  "now": "2026-07-30T10:00:00+08:00",
+  "agent": {
+    "name": "Wei Ling",
+    "max_touches": 4,
+    "voice_profile": {
+      "formality": 2,
+      "warmth": 4,
+      "brevity": 4,
+      "emoji_ok": false,
+      "sign_off": "- Wei Ling",
+      "sample_messages": []
+    }
+  },
+  "lead": {
+    "name": "Aisha",
+    "source": "99co",
+    "touch_count": 1,
+    "created_at": "2026-06-15T09:00:00+08:00",
+    "phone": "+6591282133"
+  },
+  "messages": [
+    {
+      "direction": "inbound",
+      "sent_at": "2026-07-08T11:00:00+08:00",
+      "body": "hi im looking to buy something under 1m in D19, 2 bedder is fine"
+    }
+  ],
+  "expect": {
+    "facts_extracted": [
+      {
+        "key": "budget_max",
+        "value": 1000000
+      },
+      {
+        "key": "transaction_type",
+        "value": "buy"
+      }
+    ],
+    "facts_absent": [
+      "budget_min"
+    ],
+    "no_hallucinated_entities": true
+  }
+}

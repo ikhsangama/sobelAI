@@ -1,0 +1,36 @@
+{
+  "id": "F05_opt_out",
+  "now": "2026-07-30T10:00:00+08:00",
+  "agent": {
+    "name": "Wei Ling",
+    "max_touches": 4,
+    "voice_profile": {
+      "formality": 2,
+      "warmth": 4,
+      "brevity": 4,
+      "emoji_ok": false,
+      "sign_off": "- Wei Ling",
+      "sample_messages": []
+    }
+  },
+  "lead": {
+    "name": "Kelvin",
+    "source": "propertyguru",
+    "touch_count": 1,
+    "created_at": "2026-06-25T09:00:00+08:00",
+    "opted_out": true,
+    "phone": "+6591228565"
+  },
+  "messages": [
+    {
+      "direction": "inbound",
+      "sent_at": "2026-07-25T18:00:00+08:00",
+      "body": "pls stop messaging me, already bought"
+    }
+  ],
+  "expect": {
+    "state": "do_not_contact",
+    "rule_fired": "hard_suppress",
+    "no_draft": true
+  }
+}
