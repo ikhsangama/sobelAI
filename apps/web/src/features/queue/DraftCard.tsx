@@ -5,6 +5,8 @@ import type { LeadState } from "@revive/core"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { QueueDraft } from "./useDrafts"
+import { TracePanel } from "@/features/trace/TracePanel"
+import type { TraceShape } from "@/features/trace/TracePanel"
 
 const STATE_STYLES: Record<LeadState, string> = {
   new: "bg-blue-50 text-blue-700 border-blue-200",
@@ -53,6 +55,7 @@ interface Props {
 export function DraftCard({ draft, now, busy, onApprove, onSkip }: Props) {
   const [body, setBody] = useState(draft.body)
   const [editing, setEditing] = useState(false)
+  const [traceOpen, setTraceOpen] = useState(false)
 
   const needsReview = draft.status === "needs_review"
   const guardrail = draft.trace?.guardrail as
@@ -129,10 +132,15 @@ export function DraftCard({ draft, now, busy, onApprove, onSkip }: Props) {
         <Button size="sm" variant="outline" disabled={busy} onClick={onSkip}>
           Skip
         </Button>
-        {/* §9 lists "Why this?" on the card; TracePanel itself is task 15. */}
-        <Button size="sm" variant="ghost" disabled title="Trace panel lands in task 15">
+        <Button size="sm" variant="ghost" onClick={() => setTraceOpen(true)}>
           Why this?
         </Button>
+        <TracePanel
+          trace={draft.trace as TraceShape}
+          leadName={draft.lead.name}
+          open={traceOpen}
+          onClose={() => setTraceOpen(false)}
+        />
         {body !== draft.body && (
           <button
             type="button"
