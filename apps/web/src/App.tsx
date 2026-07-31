@@ -1,5 +1,6 @@
 import { NavLink, Navigate, Route, Routes } from "react-router-dom"
 import { QueuePage } from "@/features/queue/QueuePage"
+import { ThreadView } from "@/features/thread/ThreadView"
 import { cn } from "@/lib/utils"
 
 function Sidebar() {
@@ -35,6 +36,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Navigate to="/queue" replace />} />
           <Route path="/queue" element={<QueuePage />} />
+          <Route path="/leads/:id" element={<ThreadView />} />
         </Routes>
       </main>
     </div>

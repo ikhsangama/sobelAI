@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { Link } from "react-router-dom"
 import { diffDays } from "@revive/core"
 import type { LeadState } from "@revive/core"
 import { Button } from "@/components/ui/button"
@@ -71,7 +72,14 @@ export function DraftCard({ draft, now, busy, onApprove, onSkip }: Props) {
       )}
     >
       <header className="flex flex-wrap items-center gap-2">
-        <h2 className="text-sm font-semibold text-neutral-900">{draft.lead.name}</h2>
+        <h2 className="text-sm font-semibold">
+          <Link
+            to={`/leads/${draft.lead.id}`}
+            className="text-neutral-900 underline-offset-2 hover:underline"
+          >
+            {draft.lead.name}
+          </Link>
+        </h2>
         <Chip className={STATE_STYLES[draft.lead.state]}>{draft.lead.state}</Chip>
         {daysSilent !== null && (
           <span className="text-xs text-neutral-500">{daysSilent}d silent</span>
