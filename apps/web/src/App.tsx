@@ -8,7 +8,7 @@ function Sidebar() {
       <p className="mb-4 text-sm font-semibold text-neutral-900">Revive</p>
       <NavLink
         to="/queue"
-        className={({ isActive }) =>
+        className={({ isActive }: { isActive: boolean }) =>
           cn(
             "block rounded-md px-2 py-1.5 text-sm",
             isActive
