@@ -1,0 +1,52 @@
+{
+  "id": "F19_no_budget_no_district",
+  "now": "2026-07-30T10:00:00+08:00",
+  "agent": {
+    "name": "Wei Ling",
+    "max_touches": 4,
+    "voice_profile": {
+      "formality": 2,
+      "warmth": 4,
+      "brevity": 4,
+      "emoji_ok": false,
+      "sign_off": "- Wei Ling",
+      "sample_messages": []
+    }
+  },
+  "lead": {
+    "name": "Nadia",
+    "source": "referral",
+    "touch_count": 1,
+    "created_at": "2026-06-15T09:00:00+08:00",
+    "phone": "+6591256596"
+  },
+  "messages": [
+    {
+      "direction": "inbound",
+      "sent_at": "2026-07-08T10:00:00+08:00",
+      "body": "hi! a friend passed me ur contact. thinking of buying my first place soon"
+    },
+    {
+      "direction": "outbound",
+      "sent_at": "2026-07-08T11:00:00+08:00",
+      "body": "hi Nadia! congrats on starting the search. what are u looking for?"
+    }
+  ],
+  "expect": {
+    "facts_extracted": [
+      {
+        "key": "transaction_type",
+        "value": "buy"
+      }
+    ],
+    "facts_absent": [
+      "budget_max",
+      "districts"
+    ],
+    "no_hallucinated_entities": true,
+    "draft_omits": [
+      "$"
+    ],
+    "tone_acceptable": true
+  }
+}

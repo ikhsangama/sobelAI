@@ -1,0 +1,59 @@
+{
+  "id": "F02_cold_buyer_complete",
+  "now": "2026-07-30T10:00:00+08:00",
+  "agent": {
+    "name": "Wei Ling",
+    "max_touches": 4,
+    "voice_profile": {
+      "formality": 2,
+      "warmth": 4,
+      "brevity": 4,
+      "emoji_ok": false,
+      "sign_off": "- Wei Ling",
+      "sample_messages": []
+    }
+  },
+  "lead": {
+    "name": "Priya",
+    "source": "99co",
+    "touch_count": 1,
+    "created_at": "2026-06-10T09:00:00+08:00",
+    "phone": "+6591221173"
+  },
+  "messages": [
+    {
+      "direction": "inbound",
+      "sent_at": "2026-07-09T10:00:00+08:00",
+      "body": "hi, buying. budget max 1.2m, looking at D19 only"
+    },
+    {
+      "direction": "inbound",
+      "sent_at": "2026-07-09T10:05:00+08:00",
+      "body": "3 bedroom, hoping to move in the next 3 months"
+    },
+    {
+      "direction": "outbound",
+      "sent_at": "2026-07-10T09:00:00+08:00",
+      "body": "noted Priya! ill shortlist some and revert"
+    }
+  ],
+  "expect": {
+    "facts_extracted": [
+      {
+        "key": "budget_max",
+        "value": 1200000
+      },
+      {
+        "key": "districts",
+        "value": [
+          "D19"
+        ]
+      }
+    ],
+    "state": "cold",
+    "rule_fired": "listing_hook",
+    "strategy": "new_listing_hook",
+    "no_hallucinated_entities": true,
+    "tone_acceptable": true
+  }
+}

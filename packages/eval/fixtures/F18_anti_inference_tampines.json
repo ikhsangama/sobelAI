@@ -1,0 +1,46 @@
+{
+  "id": "F18_anti_inference_tampines",
+  "now": "2026-07-30T10:00:00+08:00",
+  "agent": {
+    "name": "Wei Ling",
+    "max_touches": 4,
+    "voice_profile": {
+      "formality": 2,
+      "warmth": 4,
+      "brevity": 4,
+      "emoji_ok": false,
+      "sign_off": "- Wei Ling",
+      "sample_messages": []
+    }
+  },
+  "lead": {
+    "name": "Hakim",
+    "source": "propertyguru",
+    "touch_count": 1,
+    "created_at": "2026-06-15T09:00:00+08:00",
+    "phone": "+6591257074"
+  },
+  "messages": [
+    {
+      "direction": "inbound",
+      "sent_at": "2026-07-08T10:00:00+08:00",
+      "body": "hi, i stay in tampines now, looking to buy somewhere in the east"
+    }
+  ],
+  "expect": {
+    "facts_extracted": [
+      {
+        "key": "transaction_type",
+        "value": "buy"
+      }
+    ],
+    "facts_absent": [
+      {
+        "key": "districts",
+        "value_not": "D18"
+      }
+    ],
+    "no_hallucinated_entities": true,
+    "tone_acceptable": true
+  }
+}

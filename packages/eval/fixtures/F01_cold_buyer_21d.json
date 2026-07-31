@@ -1,0 +1,81 @@
+{
+  "id": "F01_cold_buyer_21d",
+  "now": "2026-07-30T10:00:00+08:00",
+  "agent": {
+    "name": "Wei Ling",
+    "max_touches": 4,
+    "voice_profile": {
+      "formality": 2,
+      "warmth": 4,
+      "brevity": 4,
+      "emoji_ok": false,
+      "sign_off": "- Wei Ling",
+      "sample_messages": [
+        "no worries, take ur time. shout when ready ya"
+      ]
+    }
+  },
+  "agent_b": {
+    "name": "Terence Koh",
+    "max_touches": 4,
+    "voice_profile": {
+      "formality": 5,
+      "warmth": 2,
+      "brevity": 1,
+      "emoji_ok": false,
+      "sign_off": "Best regards,\nTerence Koh",
+      "sample_messages": [
+        "Thank you for your response. Please do not hesitate to contact me should you require any further clarification."
+      ]
+    }
+  },
+  "lead": {
+    "name": "Marcus",
+    "source": "propertyguru",
+    "touch_count": 1,
+    "created_at": "2026-06-20T09:00:00+08:00",
+    "phone": "+6591206533"
+  },
+  "messages": [
+    {
+      "direction": "inbound",
+      "sent_at": "2026-07-09T14:02:00+08:00",
+      "body": "hi saw ur listing, im looking at katong area, budget around 1.5m for a 3 bedder"
+    },
+    {
+      "direction": "outbound",
+      "sent_at": "2026-07-09T14:20:00+08:00",
+      "body": "Hi Marcus! Sure, I have a few options in D15. When are you looking to move?"
+    }
+  ],
+  "expect": {
+    "facts_extracted": [
+      {
+        "key": "districts",
+        "value": [
+          "D15"
+        ]
+      },
+      {
+        "key": "budget_max",
+        "value": 1500000
+      },
+      {
+        "key": "bedrooms",
+        "value": 3
+      },
+      {
+        "key": "transaction_type",
+        "value": "buy"
+      }
+    ],
+    "facts_absent": [
+      "timeline"
+    ],
+    "state": "cold",
+    "rule_fired": "gap_fill",
+    "strategy": "fill_missing_fact",
+    "no_hallucinated_entities": true,
+    "tone_acceptable": true
+  }
+}
